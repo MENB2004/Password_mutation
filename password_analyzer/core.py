@@ -6,10 +6,28 @@ from typing import Dict, List, Optional, Tuple
 # Small educational dictionary. For the research version, replace/extend this
 # with a properly licensed dataset.
 COMMON_WORDS = {
+    # Original core
     "password", "admin", "welcome", "qwerty", "letmein", "monkey",
     "dragon", "football", "iloveyou", "hello", "login", "master",
     "summer", "winter", "spring", "autumn", "computer", "security",
     "india", "kerala", "college", "student", "secret", "pass",
+    # Common English words and root words
+    "simple", "sample", "test", "testing", "user", "access", "account",
+    "default", "system", "service", "internet", "online", "network",
+    "baseball", "basketball", "soccer", "hockey", "tennis", "champion", "winner",
+    "banana", "apple", "orange", "lemon", "cherry", "coffee", "cookie",
+    "sunshine", "shadow", "super", "secure", "trust", "change",
+    "friend", "family", "school", "office", "worker", "player",
+    "flower", "matrix", "galaxy", "space", "number", "letter",
+    "keyboard", "monitor", "screen", "mobile", "phone", "device",
+    "tiger", "tigger", "lion", "animal", "monster", "batman", "superman",
+    "princess", "queen", "king", "prince", "angel", "devil", "heaven",
+    "money", "silver", "golden", "diamond", "crystal", "carmen", "mickey",
+    "america", "canada", "london", "paris", "japan", "brazil",
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "asdfgh", "zxcvbn", "123456", "abcdef",
 }
 
 # Common leetspeak substitutions used by the mutation detector.
@@ -138,6 +156,46 @@ def normalize_substitutions(password: str) -> str:
     return "".join(SUBSTITUTIONS.get(c, c.lower()) for c in password)
 
 
+def detect_repetitive_pattern(password: str) -> bool:
+    """Detect if password contains excessive repetition (e.g. 'aaaa', '1111', 'ababab')."""
+    if len(password) < 3:
+        return False
+    if re.search(r"(.)\1{2,}", password):
+        return True
+    if len(password) >= 6 and len(set(password.lower())) <= 2:
+        return True
+    if len(password) >= 4 and len(set(password[i:i+2] for i in range(0, len(password)-1, 2))) <= 1:
+        return True
+    return False
+
+
+def detect_sequential_pattern(password: str) -> bool:
+    """Detect numeric or alphabetic sequential runs (e.g. '12345', 'abcdef', '98765')."""
+    if len(password) < 3:
+        return False
+    lower = password.lower()
+    for i in range(len(lower) - 2):
+        chunk = lower[i:i+3]
+        if chunk in "01234567890" or chunk in "09876543210":
+            return True
+        if chunk in "abcdefghijklmnopqrstuvwxyz" or chunk in "zyxwvutsrqponmlkjihgfedcba":
+            return True
+    return False
+
+
+def detect_keyboard_pattern(password: str) -> bool:
+    """Detect common keyboard spatial walks (e.g. 'qwerty', 'asdfgh', 'zxcvbn')."""
+    lower = password.lower()
+    walks = [
+        "qwerty", "wertyu", "ertyui", "rtyuio", "tyuiop",
+        "asdfgh", "sdfghj", "dfghjk", "fghjkl",
+        "zxcvbn", "xcvbnm",
+        "1qaz", "2wsx", "3edc", "4rfv", "5tgb", "6yhn", "7ujm",
+        "qazwsx", "wsxedc", "edcrfv",
+    ]
+    return any(w in lower for w in walks)
+
+
 def find_dictionary_base(password: str) -> Optional[str]:
     lower = password.lower()
 
@@ -152,52 +210,118 @@ def find_dictionary_base(password: str) -> Optional[str]:
         if word in normalized:
             return word
 
+    # Structural word-like root extraction (e.g. "Custom123!", "Anything2026#")
+    if not detect_repetitive_pattern(password) and not detect_sequential_pattern(password):
+        m = re.match(r"^([a-zA-Z]{3,})(?=\d|[^a-zA-Z0-9]|$)", password)
+        if m:
+            cand = m.group(1).lower()
+            prefix = password[:len(cand)]
+            if prefix.islower() or prefix.isupper() or prefix.istitle():
+                return cand
+
     return None
 
 
 def detect_mutations(password: str, dictionary_base: Optional[str]) -> List[str]:
     mutations: List[str] = []
 
-    if dictionary_base:
-        base = dictionary_base
+    has_trivial_pattern = (
+        detect_repetitive_pattern(password) or
+        detect_sequential_pattern(password) or
+        detect_keyboard_pattern(password)
+    )
+
+    if dictionary_base or has_trivial_pattern:
+        base = dictionary_base or ""
         normalized = normalize_substitutions(password)
-        if password != password.lower() and (base in password.lower() or base in normalized):
+
+        # Capitalization
+        if password and password[0].isupper() and (len(password) == 1 or any(c.islower() for c in password[1:])):
+            if re.match(r"^[A-Z][a-z0-9!@#$%^&*?]+$", password):
+                mutations.append("capitalization")
+            elif any(c.isupper() for c in password[1:]):
+                mutations.append("capitalization")
+        elif base and password != password.lower() and (base in password.lower() or base in normalized):
             mutations.append("capitalization")
 
-        if base not in password.lower() and base in normalized:
+        # Substitution
+        if base and base not in password.lower() and base in normalized:
             mutations.append("character substitution")
+        elif any(c in SUBSTITUTIONS for c in password) and any(c.isalpha() for c in password):
+            if base or any(w in normalized.lower() for w in COMMON_WORDS):
+                mutations.append("character substitution")
 
-        # Digits after a dictionary-like base (optionally followed by symbols).
-        if re.search(r"\d+([!@#$%^&*?]+)?$", password):
+        # Numeric suffix
+        if base and re.search(r"\d+([!@#$%^&*?]+)?$", password):
+            mutations.append("numeric suffix")
+        elif re.search(r"[a-zA-Z]\d{2,}([!@#$%^&*?]+)?$", password):
+            mutations.append("numeric suffix")
+        elif detect_sequential_pattern(password) and any(c.isdigit() for c in password):
             mutations.append("numeric suffix")
 
-        # Common symbol addition.
+        # Symbol suffix
         if re.search(r"[!@#$%^&*?]+$", password):
             mutations.append("symbol suffix")
 
-    return mutations
+    # Trivial / repetitive patterns
+    if detect_repetitive_pattern(password):
+        mutations.append("repetitive characters")
+    if detect_sequential_pattern(password):
+        mutations.append("sequential characters")
+    if detect_keyboard_pattern(password):
+        mutations.append("keyboard sequence")
+
+    seen = set()
+    deduped = []
+    for m in mutations:
+        if m not in seen:
+            seen.add(m)
+            deduped.append(m)
+    return deduped
 
 
 def mutation_components(password: str, dictionary_base: Optional[str]) -> Dict[str, float]:
     lower = password.lower()
     normalized = normalize_substitutions(password)
 
-    dictionary_score = 1.0 if dictionary_base else 0.0
+    has_trivial_pattern = (
+        detect_repetitive_pattern(password) or
+        detect_sequential_pattern(password) or
+        detect_keyboard_pattern(password)
+    )
+
+    dictionary_score = 1.0 if (dictionary_base or has_trivial_pattern) else 0.0
 
     capitalization_score = 0.0
-    if dictionary_base and (dictionary_base in lower or dictionary_base in normalized):
-        # Title case / first-letter capitalization is especially predictable.
-        if password == password[0].upper() + password[1:]:
-            capitalization_score = 1.0
-        elif any(c.isupper() for c in password):
-            capitalization_score = 0.7
+    if (dictionary_base or has_trivial_pattern):
+        if password and password[0].isupper() and any(c.islower() for c in password[1:]):
+            if re.match(r"^[A-Z][a-z0-9!@#$%^&*?]+$", password):
+                capitalization_score = 1.0
+            elif any(c.isupper() for c in password):
+                capitalization_score = 0.7
+        elif dictionary_base and (dictionary_base in lower or dictionary_base in normalized):
+            if password == password[0].upper() + password[1:]:
+                capitalization_score = 1.0
+            elif any(c.isupper() for c in password):
+                capitalization_score = 0.7
 
     substitution_score = 0.0
     if dictionary_base and dictionary_base not in lower and dictionary_base in normalized:
         substitution_score = 1.0
+    elif has_trivial_pattern and (detect_repetitive_pattern(password) or detect_sequential_pattern(password)):
+        substitution_score = 0.5
 
-    numeric_score = 1.0 if (dictionary_base and re.search(r"\d+([!@#$%^&*?]+)?$", password)) else 0.0
-    symbol_score = 1.0 if (dictionary_base and re.search(r"[!@#$%^&*?]+$", password)) else 0.0
+    numeric_score = 0.0
+    if dictionary_base and re.search(r"\d+([!@#$%^&*?]+)?$", password):
+        numeric_score = 1.0
+    elif re.search(r"[a-zA-Z]\d{2,}([!@#$%^&*?]+)?$", password):
+        numeric_score = 1.0
+    elif has_trivial_pattern and any(c.isdigit() for c in password):
+        numeric_score = 1.0
+
+    symbol_score = 0.0
+    if (dictionary_base or has_trivial_pattern) and re.search(r"[!@#$%^&*?]+$", password):
+        symbol_score = 1.0
 
     return {
         "capitalization": capitalization_score,
@@ -279,7 +403,9 @@ def evaluate_calibrated_psi(h_bits: float,
     return calibrated_psi, classification
 
 
-def risk_category(psi: float) -> str:
+def risk_category(psi: float, length: int = 12) -> str:
+    if length < 8:
+        return "High predictability risk" if psi < 35 else "Moderate predictability risk"
     if psi < 25:
         return "High predictability risk"
     if psi < 50:
@@ -336,7 +462,7 @@ def analyze_password(password: str,
         mvs=mvs,
         entropy_normalized=e_norm,
         psi=psi,
-        risk_category=risk_category(psi),
+        risk_category=risk_category(psi, L),
         empirical_probabilities=probs,
         surprisal_bits=surprisal,
         empirical_mvs=emp_mvs,

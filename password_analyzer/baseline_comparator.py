@@ -112,24 +112,32 @@ def generate_explanation(analysis, est_res: Dict[str, Any]) -> str:
     muts = analysis.mutations
     h = analysis.entropy_bits
 
-    if p:
-        mut_desc = ", ".join(muts) if muts else "no subsequent mutations"
+    if p or muts or analysis.mvs > 0:
+        base_desc = f"dictionary root '{p}'" if p else "predictable structural pattern"
+        mut_desc = f"alongside predictable mutations ({', '.join(muts)})" if muts else "with no subsequent mutations"
         return (
             f"Although this password achieves a theoretical Shannon entropy of {h:.2f} bits, "
-            f"the detection of dictionary root '{p}' alongside predictable mutations ({mut_desc}) "
+            f"the detection of {base_desc} {mut_desc} "
             f"increases its Mutation Vulnerability Score (MVS: {analysis.mvs:.1f}/100). "
             f"Consequently, the Password Security Index discounts the score to {analysis.psi:.1f}/100 "
             f"({analysis.risk_category}). Existing estimator ({est_res['name']}) scores it "
             f"{est_res['score']}/4 ('{est_res['category']}')."
         )
-    else:
+    elif analysis.password_length < 8:
         return (
-            f"No dictionary base was detected in this password. Because generic digits, symbols, "
-            f"and uppercase letters are not treated as predictable mutations without a dictionary root, "
-            f"the password receives an MVS of {analysis.mvs:.1f}/100. Its security is primarily "
-            f"governed by character pool diversity and length, yielding PSI: {analysis.psi:.1f}/100 "
+            f"This password is critically short ({analysis.password_length} characters). "
+            f"Regardless of character diversity, short passwords have an exhausted search space "
+            f"and can be rapidly brute-forced. It achieves {h:.2f} bits of theoretical entropy and PSI: {analysis.psi:.1f}/100 "
             f"({analysis.risk_category}). Existing estimator ({est_res['name']}) scores it "
             f"{est_res['score']}/4 ('{est_res['category']}')."
+        )
+    else:
+        return (
+            f"No dictionary base was detected in this password. The password exhibits non-predictable, "
+            f"pseudo-random character distribution, receiving an MVS of {analysis.mvs:.1f}/100. "
+            f"Its security is primarily governed by character pool diversity and length, "
+            f"yielding PSI: {analysis.psi:.1f}/100 ({analysis.risk_category}). "
+            f"Existing estimator ({est_res['name']}) scores it {est_res['score']}/4 ('{est_res['category']}')."
         )
 
 

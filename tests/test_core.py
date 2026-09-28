@@ -435,3 +435,38 @@ def test_import_research_dataset_tsv_and_quotes(tmp_path):
     assert report.total_records == 2
     assert "leak1" in report.source_distribution
 
+
+def test_simple_passwords_vulnerability_detection():
+    # 1. Repetitive characters
+    rep_res = analyze_password("111111111111")
+    assert rep_res.mvs > 50.0
+    assert "repetitive characters" in rep_res.mutations
+    assert rep_res.risk_category == "High predictability risk"
+
+    # 2. Sequential digits
+    seq_res = analyze_password("123456789012")
+    assert seq_res.mvs > 50.0
+    assert "sequential characters" in seq_res.mutations
+    assert seq_res.risk_category == "High predictability risk"
+
+    # 3. Simple dictionary + predictable mutations
+    simple_res = analyze_password("Simple123!")
+    assert simple_res.dictionary_base == "simple"
+    assert "capitalization" in simple_res.mutations
+    assert "numeric suffix" in simple_res.mutations
+    assert "symbol suffix" in simple_res.mutations
+    assert simple_res.mvs >= 70.0
+    assert simple_res.psi < 30.0
+    assert simple_res.risk_category == "High predictability risk"
+
+    # 4. Keyboard walks
+    kb_res = analyze_password("qwertyuiop")
+    assert "keyboard sequence" in kb_res.mutations
+    assert kb_res.mvs > 0.0
+
+    # 5. Short passwords
+    short_res = analyze_password("cat")
+    assert short_res.dictionary_base == "cat"
+    assert short_res.risk_category == "High predictability risk"
+
+
