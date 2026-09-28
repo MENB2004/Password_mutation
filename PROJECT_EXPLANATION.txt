@@ -1,0 +1,456 @@
+================================================================================
+PASSWORD STRENGTH & PREDICTABLE MUTATION ANALYSIS
+COMPLETE PROJECT GUIDE AND COMPREHENSIVE EXPLANATION
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. Executive Summary & Problem Statement
+2. Why Traditional Password Checkers Fail
+3. The Mathematical Model (Step-by-Step)
+4. Evolution Across the 5 Research Phases + Baseline Extensions
+5. Established Baseline Comparison (Dropbox zxcvbn vs Proposed PSI)
+6. Real-World Walkthrough (Comparing Three Benchmark Passwords)
+7. Real / Public Research Dataset Pipeline (Privacy-Preserving)
+8. Repository Structure & File Breakdown
+9. How to Run the Project (CLI, Streamlit Web App, Unit Tests, Experiments)
+10. Academic Limitations & Ethical Research Disclaimer
+11. Original Project Objectives Fulfillment Matrix
+
+
+================================================================================
+1. EXECUTIVE SUMMARY & PROBLEM STATEMENT
+================================================================================
+
+This project is an academic research and engineering project that solves a 
+fundamental flaw in conventional password security meters.
+
+Traditional password meters (like those on websites that display a green bar) 
+judge password strength almost entirely on:
+  - Length (number of characters)
+  - Character diversity (does it contain lowercase, uppercase, digits, and symbols?)
+
+Under conventional rules:
+  "Password123!" scores as "VERY STRONG" or "100% EXCELLENT" because:
+    - It has 12 characters
+    - It has uppercase ("P")
+    - It has lowercase ("assword")
+    - It has numeric digits ("123")
+    - It has symbols ("!")
+
+IN REALITY:
+  "Password123!" is one of the most commonly cracked passwords in the world! 
+  An attacker using standard cracking rigs (e.g., Hashcat / John the Ripper) 
+  will crack it in seconds. 
+  
+  Why? Because humans do not select characters uniformly at random. 
+  Instead, humans predictably:
+    1. Pick a dictionary root word ("password")
+    2. Capitalize the first letter ("P")
+    3. Append common sequential or year digits ("123", "2026")
+    4. Append a punctuation symbol at the end ("!")
+
+This project introduces a rigorous mathematical framework that combines:
+  - Theoretical Shannon Entropy (idealized uniform search space)
+  - Predictable Mutation Detection (identifying human construction patterns)
+  - Mutation Vulnerability Score (MVS) (fixed-weight and empirical likelihoods)
+  - Information Surprisal (in bits, measuring feature rarity)
+  - Password Security Index (PSI) (a combined score penalizing predictable mutations)
+  - Established Baseline Comparison (quantifying performance against Dropbox zxcvbn)
+  - Held-out Calibration & Decision Rules (empirically separating vulnerable vs strong passwords)
+
+
+================================================================================
+2. WHY TRADITIONAL PASSWORD CHECKERS FAIL
+================================================================================
+
+Conventional password checkers make an assumption of "Independent Uniform Selection":
+They assume every character in a password was chosen independently at random, like rolling 
+a 94-sided die for every position.
+
+Under that flawed assumption:
+  - Character pool N = 94 (26 lowercase + 26 uppercase + 10 digits + 32 symbols)
+  - Length L = 12
+  - Theoretical Search Space S = 94^12 = 475,920,314,814,253,376,475,136 possibilities!
+  - Shannon Entropy H = 12 * log2(94) = 78.66 bits!
+
+This makes "Password123!" look like it requires 475 sextillion guesses.
+However, attackers use dictionary wordlists and rule-based mutation engines. 
+To an attacker, the password's actual structure is:
+  [Root Word] + [3-digit suffix] + [1 symbol]
+
+The actual search space is a few thousand guesses, not sextillions!
+This project bridges that gap by explicitly detecting predictable mutations 
+and penalizing passwords that rely on human construction habits.
+
+
+================================================================================
+3. THE MATHEMATICAL MODEL (STEP-BY-STEP)
+================================================================================
+
+The project computes several mathematical metrics for each password:
+
+1. THEORETICAL SEARCH SPACE (S):
+   S = N^L
+   where:
+     L = Password length
+     N = Size of character pool inferred from character classes present:
+         - Lowercase letters: +26
+         - Uppercase letters: +26
+         - Numeric digits:    +10
+         - Printable symbols: +32
+
+2. THEORETICAL SHANNON ENTROPY (H):
+   H = L * log2(N)  (measured in bits)
+   This represents the maximum theoretical uncertainty under independent uniform choice.
+
+3. PREDICTABLE MUTATION DETECTION:
+   The algorithm inspects the password for a root dictionary word 
+   (e.g., "password", "admin", "welcome", "summer", "college").
+   If a dictionary base is present, it evaluates 4 human mutation channels:
+     a) Capitalization: Is the first letter capitalized (TitleCase) or altered?
+     b) Substitution: Was leetspeak used? (@ for a, 0 for o, 1 for i, 3 for e, $ for s)
+     c) Numeric suffix: Are digits appended after the base (e.g., 1, 123, 2026)?
+     d) Symbol suffix: Are symbols appended at the end (e.g., !, @, #)?
+
+   CRITICAL MODELING RULE:
+   If NO dictionary base is present (e.g. a random string like "vQ7mK2xR9zP4"), 
+   generic digits and uppercase letters are NOT penalized as mutations. 
+   The mutation score remains 0.0.
+
+4. MUTATION VULNERABILITY SCORE (MVS):
+   Each mutation component xi is assigned a weight wi.
+   Baseline weights:
+     - Dictionary base:  0.35
+     - Substitution:     0.20
+     - Numeric suffix:   0.20
+     - Capitalization:   0.15
+     - Symbol suffix:    0.10
+     (Weights sum to 1.0)
+
+   Fixed MVS formula:
+     MVS = 100 * sum(wi * xi)
+     Ranges from 0.0 (no predictability) to 100.0 (maximum predictability).
+
+5. EMPIRICAL PROBABILITY & SURPRISAL MODEL (PHASE 3):
+   Instead of arbitrary static weights, Phase 3 estimates the empirical 
+   frequency of each mutation from a research corpus using Laplace smoothing:
+     p_hat = (k + 1) / (n + 2)
+
+   Information Content / Surprisal (in bits):
+     I = -log2(p_hat)
+     (Rarer mutations carry high surprisal; common habits carry low surprisal).
+
+   Empirical MVS formula:
+     MVS_emp = 100 * [sum(wi * p_hat_i * xi)] / [sum(wi * xi)]
+
+6. PASSWORD SECURITY INDEX (PSI):
+   Entropy H is normalized against a reference entropy H_ref (e.g., 80 bits baseline, 
+   calibrated to 50 bits in Phase 5):
+     E_norm = min(H / H_ref, 1.0)
+
+   The combined score discounts normalized entropy by the mutation vulnerability:
+     PSI = 100 * E_norm * (1 - MVS / 100)
+
+   Interpretation:
+     - PSI < 25:  High predictability risk
+     - PSI 25-50: Moderate predictability risk
+     - PSI 50-75: Moderate security
+     - PSI >= 75: Higher security
+
+7. INDEPENDENT CALIBRATION & DECISION BOUNDARY (PHASE 5):
+   Using an independent held-out calibration split:
+     - Calibrated Reference Entropy: H_ref = 50.0 bits
+     - Calibrated Decision Threshold: tau = 69.0
+     - Decision Rule:
+         PSI >= 69.0  ==>  Low Vulnerability (Synthetic Random-like Control)
+         PSI < 69.0   ==>  Predictable Mutation (Vulnerable Family)
+
+
+================================================================================
+4. EVOLUTION ACROSS THE 5 RESEARCH PHASES + BASELINE EXTENSIONS
+================================================================================
+
+The project evolved across structured research phases:
+
+PHASE 1: BASELINE THEORETICAL FORMULATION
+  - Designed the initial mathematical formulas for S, H, MVS, and PSI.
+  - Implemented the core Python analyzer and dictionary matcher.
+
+PHASE 2: SYNTHETIC DATASET GENERATION
+  - Built a controlled synthetic dataset of 330 passwords (data/synthetic_password_dataset.csv).
+  - Divided passwords into mutation families (dictionary_only, capitalization,
+    numeric_suffix, substitution, combination) and synthetic random controls.
+  - Demonstrated that conventional metrics give high scores to predictable passwords, 
+    whereas PSI accurately captures their vulnerability.
+
+PHASE 3: EMPIRICAL PROBABILITY ESTIMATION
+  - Calculated empirical conditional probabilities using Laplace smoothing:
+      * Capitalization frequency:  p_hat = 46/107 (~0.430) -> Surprisal = 1.22 bits
+      * Substitution frequency:    p_hat = 46/107 (~0.430) -> Surprisal = 1.22 bits
+      * Numeric suffix frequency:  p_hat = 31/107 (~0.290) -> Surprisal = 1.79 bits
+      * Symbol suffix frequency:   p_hat = 31/107 (~0.290) -> Surprisal = 1.79 bits
+      * Dictionary base frequency: p_hat = 106/332 (~0.319) -> Surprisal = 1.65 bits
+  - Validated statistical significance using the Mann-Whitney U test and bootstrap 
+    resampling (p < 1e-49, rank-biserial effect r > 0.99).
+
+PHASE 4: SENSITIVITY AND PARAMETER STABILITY
+  - Tested 5 distinct weight profiles:
+      1. Baseline (C=0.15, S=0.20, N=0.20, Y=0.10, D=0.35)
+      2. Dictionary-heavy (D=0.50)
+      3. Mutation-heavy (S=0.25, N=0.25, C=0.20, D=0.20, Y=0.10)
+      4. Equal (All components = 0.20)
+      5. Suffix-heavy (N=0.30, Y=0.20, D=0.25, C=0.15, S=0.10)
+  - Swept H_ref from 40 to 140 bits.
+  - Confirmed rank stability (Spearman rank correlation > 0.98 across parameter grids).
+
+PHASE 5: INDEPENDENT CALIBRATION & HELD-OUT VALIDATION
+  - Created a separate, unseen dataset generated with an independent random seed.
+  - Split into a Calibration set and a Held-out Evaluation set.
+  - Calibrated parameters on the calibration split only:
+      * Selected H_ref = 50.0 bits
+      * Selected Decision Threshold tau = 69.0
+  - Achieved AUC = 1.00 and 100% held-out classification accuracy on synthetic families.
+
+NEW EXTENSION: ESTABLISHED BASELINE COMPARISON & BENCHMARKING (TASKS 1-13)
+  - Integrated Dropbox's local zxcvbn library as an industry baseline.
+  - Executed benchmark experiments across all 330 synthetic passwords.
+  - Generated 8 publication-quality 300 DPI figures in results/.
+  - Added a privacy-preserving Public Research Dataset ingestion pipeline.
+  - Expanded Streamlit web app with 6 specialized tabs including "Model Comparison".
+  - Extended pytest unit test suite to 23 comprehensive tests.
+  - Updated formal DOCX academic report, PPTX presentation, and deliverables audit.
+
+
+================================================================================
+5. ESTABLISHED BASELINE COMPARISON (DROPBOX ZXCVBN VS PROPOSED PSI)
+================================================================================
+
+Why compare with Dropbox zxcvbn?
+  Dropbox zxcvbn is one of the most widely adopted open-source password estimators.
+  It uses dynamic programming to search for the lowest-entropy matching sequence of 
+  dictionary words, spatial keyboard patterns, dates, and repetitions.
+
+How do the models differ?
+  1. Conventional Entropy: Assumes independent uniform character selection. Highly overestimates.
+  2. Dropbox zxcvbn: Heuristic pattern-matching giving a score 0-4 and crack time estimates.
+  3. Proposed MVS: Explicitly isolates and quantifies the 5 human mutation channels.
+  4. Proposed PSI: Mathematically discounts Shannon entropy by MVS, providing an interpretable 
+     continuous score [0, 100] and calibrated classification.
+
+Experimental Benchmark Results (N = 330 synthetic passwords):
+  Method                Accuracy   Precision  Recall     F1-Score   ROC-AUC    PR-AUC
+  ----------------------------------------------------------------------------------
+  Proposed PSI          0.9788     1.0000     0.9333     0.9655     1.0000     1.0000
+  Dropbox zxcvbn        0.9242     0.8077     1.0000     0.8936     0.9937     0.9780
+  Entropy-Only          0.8000     0.6211     0.9524     0.7519     0.9365     0.8913
+  Proposed MVS          1.0000     1.0000     1.0000     1.0000     1.0000     1.0000
+  Proposed Emp MVS      1.0000     1.0000     1.0000     1.0000     1.0000     1.0000
+
+
+================================================================================
+6. REAL-WORLD WALKTHROUGH (COMPARING THREE BENCHMARK PASSWORDS)
+================================================================================
+
+Let's examine how each model evaluates three canonical test passwords:
+
+--------------------------------------------------------------------------------
+PASSWORD 1: "Password123!" (Predictable Title-Case Suffix Mutation)
+--------------------------------------------------------------------------------
+  - Length: 12 | Pool size N: 94 | Search Space: 4.75 x 10^23 | Theoretical Entropy: 78.66 bits
+  - Conventional Score: 100.0 / 100 (False sense of security!)
+  - Detected Mutations: Dictionary base "password", Capitalization ("P"), Numeric suffix ("123"), Symbol suffix ("!")
+  - Proposed MVS: 80.0 / 100 | Empirical MVS: 32.9 / 100
+  - Proposed PSI: 19.7 / 100 (High predictability risk)
+  - Existing Estimator (Dropbox zxcvbn): Score 1/4 ("Weak - very guessable", Crack time: 4 seconds)
+  - Calibrated Classification: PREDICTABLE MUTATION (VULNERABLE FAMILY)
+  - Explanation: Although this password contains 4 character classes and 78.66 bits of entropy, 
+    the dictionary base and predictable suffix pattern severely increase its vulnerability.
+
+--------------------------------------------------------------------------------
+PASSWORD 2: "vQ7mK2xR9zP4" (Synthetic Random-Like Control)
+--------------------------------------------------------------------------------
+  - Length: 12 | Pool size N: 62 | Search Space: 3.22 x 10^21 | Theoretical Entropy: 71.45 bits
+  - Conventional Score: 81.2 / 100
+  - Detected Mutations: None (No dictionary base detected!)
+  - Proposed MVS: 0.0 / 100 | Empirical MVS: 0.0 / 100
+  - Proposed PSI: 89.3 / 100 (Higher security)
+  - Existing Estimator (Dropbox zxcvbn): Score 4/4 ("Strong - very unguessable", Crack time: 3 years)
+  - Calibrated Classification: LOW VULNERABILITY (SYNTHETIC RANDOM-LIKE CONTROL)
+  - Explanation: No dictionary base was detected. Generic numbers and uppercase letters are not 
+    penalized as predictable mutations without a dictionary root. Security is governed by true entropy.
+
+--------------------------------------------------------------------------------
+PASSWORD 3: "P@ssword2026!" (Complex Mutation with Leetspeak Substitution)
+--------------------------------------------------------------------------------
+  - Length: 13 | Pool size N: 94 | Search Space: 4.47 x 10^25 | Theoretical Entropy: 85.21 bits
+  - Conventional Score: 100.0 / 100 (Completely misled by character variety!)
+  - Detected Mutations: Dictionary base "password", Capitalization ("P"), Substitution ("@" for "a"), 
+    Numeric suffix ("2026"), Symbol suffix ("!")
+  - Proposed MVS: 100.0 / 100 | Empirical MVS: 34.9 / 100
+  - Proposed PSI: 0.0 / 100 (Completely compromised by predictable construction)
+  - Existing Estimator (Dropbox zxcvbn): Score 2/4 ("Fair - somewhat guessable", Crack time: 17 minutes)
+  - Calibrated Classification: PREDICTABLE MUTATION (VULNERABLE FAMILY)
+  - Explanation: Users often believe replacing "a" with "@" and adding "2026!" makes a password 
+    unbreakable. Our mutation engine reverses the substitution to recover root "password" and 
+    correctly discounts PSI to 0.0 / 100.
+
+
+================================================================================
+7. REAL / PUBLIC RESEARCH DATASET PIPELINE (PRIVACY-PRESERVING)
+================================================================================
+
+To allow researchers to test real-world breach data without compromising security:
+  - Supported Schema: CSV format with `password_or_pattern`, `source_or_group`, and `label`.
+  - Privacy Guarantee: Individual passwords are NEVER logged to disk, displayed in the UI, 
+    or rendered in report charts.
+  - Telemetry Output: Aggregate statistics only:
+      * Dictionary-base frequency
+      * Capitalization frequency
+      * Character substitution frequency
+      * Numeric suffix frequency
+      * Symbol suffix frequency
+  - Strict Data Segregation: Explicitly separates "SYNTHETIC DATA" from "REAL/PUBLIC RESEARCH DATA".
+  - Example Reference Schema: data/public_research_dataset_example.csv
+
+
+================================================================================
+8. REPOSITORY STRUCTURE & FILE BREAKDOWN
+================================================================================
+
+password_mutation_project/
+|-- app.py                                   Streamlit web application (6 specialized tabs)
+|-- main.py                                  CLI runner forwarding to password_analyzer
+|-- experiments.py                           Automated research runner & benchmark figure generator
+|-- requirements.txt                         Package dependencies
+|-- pyproject.toml                           Packaging and pytest configuration
+|-- README.md                                Complete documentation and instructions
+|-- PROJECT_EXPLANATION.txt                  This comprehensive guide
+|-- password_mutation_project_final_v2.zip   Portable complete distribution archive (2.32 MB)
+|
+|-- password_analyzer/                       Core Python Package
+|   |-- __init__.py                          Public exports
+|   |-- core.py                              Mathematical engine (H, MVS, PSI, Calibration)
+|   |-- baseline_comparator.py               Dropbox zxcvbn comparator & benchmark suite
+|   |-- dataset_pipeline.py                  Public research dataset privacy pipeline
+|   |-- experiment_runner.py                 Baseline benchmark & publication figure generator
+|   |-- cli.py                               Formatted CLI analysis output
+|   |-- __main__.py                          Enables "python -m password_analyzer"
+|
+|-- tests/
+|   |-- test_core.py                         23 comprehensive pytest unit tests
+|
+|-- data/
+|   |-- synthetic_password_dataset_phase3.csv Phase 3 dataset (330 rows)
+|   |-- phase5_calibration_split.csv          Phase 5 calibration data split
+|   |-- phase5_heldout_split.csv              Phase 5 held-out evaluation data split
+|   |-- public_research_dataset_example.csv   Documented public research example schema
+|
+|-- docs/
+|   |-- MATHEMATICAL_MODEL.md                Comprehensive formal mathematical documentation
+|
+|-- results/
+|   |-- baseline_comparison.csv              Benchmark evaluation across all 5 models (330 rows)
+|   |-- BASELINE_COMPARISON_REPORT.md        Detailed baseline evaluation report
+|   |-- baseline_*.png                       8 publication-quality 300 DPI figures
+|   |-- phase2-5 reports and CSV datasets    Historical research phase artifacts
+|
+|-- final_submission/
+    |-- Password_Strength_Predictable_Mutation_Final_Report.docx  Academic Word report
+    |-- Password_Strength_Predictable_Mutation_Presentation.pptx  20-slide presentation
+    |-- PROJECT_SUMMARY.md                   Executive deliverables and objectives audit
+
+
+================================================================================
+9. HOW TO RUN THE PROJECT (CLI, STREAMLIT WEB APP, UNIT TESTS, EXPERIMENTS)
+================================================================================
+
+Because Python virtual environment binaries are stored in `.venv`, here are the exact 
+commands to run each component on Windows PowerShell:
+
+1. RUNNING THE INTERACTIVE STREAMLIT WEB APP:
+   Direct command (no environment activation needed):
+     .venv\Scripts\python.exe -m streamlit run app.py
+   or:
+     .venv\Scripts\streamlit.exe run app.py
+
+   Alternatively, if you activate the virtual environment first:
+     .\.venv\Scripts\Activate.ps1
+     streamlit run app.py
+
+   (If PowerShell displays an execution policy error, run:
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    then run Activate.ps1).
+
+   Open your browser at:
+     http://localhost:8501
+
+   The Streamlit app features 6 dedicated tabs:
+     - Tab 1: Password Analyzer (real-time entropy, MVS, PSI)
+     - Tab 2: Model Comparison (5-part breakdown comparing conventional, zxcvbn, and PSI)
+     - Tab 3: Research Benchmark (side-by-side comparison of the 3 canonical passwords)
+     - Tab 4: Phase 1-5 Research Data (interactive tables for all 330 synthetic samples)
+     - Tab 5: Baseline Visualizations (interactive gallery of all 8 publication figures)
+     - Tab 6: Public Research Dataset (upload external CSVs for privacy-preserving telemetry)
+
+2. RUNNING VIA COMMAND LINE INTERFACE (CLI):
+   Analyze any password from your terminal:
+     .venv\Scripts\python.exe -m password_analyzer "Password123!"
+     .venv\Scripts\python.exe -m password_analyzer "vQ7mK2xR9zP4"
+     .venv\Scripts\python.exe -m password_analyzer "P@ssword2026!"
+   or:
+     .venv\Scripts\python.exe main.py "Password123!"
+
+3. RUNNING THE UNIT TEST SUITE:
+   Execute all 23 unit tests via pytest:
+     .venv\Scripts\pytest.exe -v
+   All 23 tests pass cleanly in under 0.5 seconds.
+
+4. RUNNING THE AUTOMATED EXPERIMENT BENCHMARK:
+   Regenerate all baseline comparison tables, metric reports, and 8 publication figures:
+     .venv\Scripts\python.exe experiments.py
+
+
+================================================================================
+10. ACADEMIC LIMITATIONS & ETHICAL RESEARCH DISCLAIMER
+================================================================================
+
+1. EXPERIMENTAL STATUS:
+   The Mutation Vulnerability Score (MVS) and Password Security Index (PSI) are 
+   academic research metrics. They are not official NIST SP 800-63B standards, 
+   ISO/IEC standards, or formal cryptographic proofs.
+
+2. CONTROLLED SYNTHETIC DATASET:
+   Evaluation was conducted on a controlled synthetic corpus (N = 330). While ideal 
+   for isolating variables and validating hypotheses, synthetic datasets do not claim 
+   to mirror the full distribution of global breach corpuses.
+
+3. WORK-FACTOR VS SCORING:
+   A low PSI indicates predictable structure according to the model's ruleset; it does 
+   not guarantee cracking times under specialized distributed GPU password cracking rigs.
+
+4. DICTIONARY COVERAGE:
+   The accuracy of dictionary detection depends on the underlying dictionary lexicon. 
+   Words outside the dictionary will not trigger mutation penalties.
+
+5. PRIVACY SAFEGUARDS:
+   The software runs 100% locally. Never enter active credentials protecting personal, 
+   financial, or corporate accounts. Use synthetic examples for research.
+
+
+================================================================================
+11. ORIGINAL PROJECT OBJECTIVES FULFILLMENT MATRIX
+================================================================================
+
+| Original Objective                | Technical Implementation       | Verifiable Evidence | Status    |
+|-----------------------------------|--------------------------------|---------------------|:---------:|
+| Measure conventional strength     | Search space S=N^L, Entropy H  | results/baseline_comparison.csv | COMPLETED |
+| Detect dictionary & pattern risks | Dictionary substring & leet    | password_analyzer/core.py | COMPLETED |
+| Detect predictable mutations      | 4-channel mutation detectors   | password_analyzer/core.py | COMPLETED |
+| Develop Mutation Vulnerability    | Fixed & empirical MVS formulas | results/empirical_mutation_probabilities.csv | COMPLETED |
+| Combine into realistic assessment | Password Security Index (PSI)  | results/phase5_heldout_evaluation.csv | COMPLETED |
+| Compare against conventional      | Benchmark with zxcvbn & entropy| results/BASELINE_COMPARISON_REPORT.md, 8 graphs | COMPLETED |
+
+================================================================================
+END OF GUIDE
+================================================================================

@@ -1,0 +1,2 @@
+comparison,mutation_n,random_n,mutation_mean_psi,random_mean_psi,mean_difference_random_minus_mutation,bootstrap_95ci_low,bootstrap_95ci_high,mann_whitney_u,mann_whitney_p,rank_biserial_effect,spearman_mvs_psi,spearman_p
+Mutation families vs synthetic random-like,105,225,37.04125144545241,88.34034382852748,51.29909238307507,48.812952550188356,53.83092473533736,6.0,6.636926789237344e-50,0.9994920634920635,-0.7881172185142015,4.158272253439099e-71

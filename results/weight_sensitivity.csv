@@ -1,0 +1,16 @@
+password_example,weight_profile,mvs,psi
+Password123!,Baseline,80.0,19.66376655503291
+Password123!,Dictionary-heavy,85.0,14.74782491627469
+Password123!,Mutation-heavy,80.0,19.66376655503291
+P@ssword123!,Baseline,65.0,34.4115914713076
+P@ssword123!,Dictionary-heavy,75.0,24.579708193791145
+P@ssword123!,Mutation-heavy,60.0,39.327533110065836
+vQ7mK2xR9zP4,Baseline,20.0,71.4503557246425
+vQ7mK2xR9zP4,Dictionary-heavy,15.0,75.91600295743265
+vQ7mK2xR9zP4,Mutation-heavy,20.0,71.4503557246425
+welcome2026,Baseline,75.0,17.77161719245795
+welcome2026,Dictionary-heavy,80.0,14.217293753966356
+welcome2026,Mutation-heavy,65.0,24.88026406944113
+aX9qLm2P7vT8,Baseline,20.0,71.4503557246425
+aX9qLm2P7vT8,Dictionary-heavy,15.0,75.91600295743265
+aX9qLm2P7vT8,Mutation-heavy,20.0,71.4503557246425

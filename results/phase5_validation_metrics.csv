@@ -1,0 +1,2 @@
+selected_H_ref,calibration_threshold,calibration_accuracy,heldout_accuracy,heldout_auc_PSI,heldout_average_precision_PSI,heldout_auc_conventional,heldout_average_precision_conventional,TN,FP,FN,TP
+50,69.0,1.0,1.0,1.0,1.0,0.985101148168398,0.9912597202906003,62,0,0,118

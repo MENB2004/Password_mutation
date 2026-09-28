@@ -1,0 +1,16 @@
+password_or_pattern,source_group,label
+password2024,public_leak_sample_A,dictionary_year_suffix
+Admin@123,public_leak_sample_A,title_case_symbol_number
+Welcome#1,public_leak_sample_A,title_case_symbol_number
+summer2025!,public_leak_sample_B,dictionary_year_symbol
+Security@2026,public_leak_sample_B,title_case_symbol_year
+college99,public_leak_sample_B,dictionary_num_suffix
+p@ssw0rd123,public_leak_sample_C,leetspeak_number_suffix
+qwerty2024,public_leak_sample_C,walk_year_suffix
+football!,public_leak_sample_C,dictionary_symbol_suffix
+dr@g0n2025,public_leak_sample_D,leetspeak_year_suffix
+Winter2026!,public_leak_sample_D,title_case_year_symbol
+master2024#,public_leak_sample_D,dictionary_year_symbol
+K8#mP2$xQ9vL5,curated_random_controls,high_entropy_control
+tR4*wY9!zC1&bV,curated_random_controls,high_entropy_control
+pL9@vM3#xZ7$qK,curated_random_controls,high_entropy_control
