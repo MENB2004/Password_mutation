@@ -412,3 +412,26 @@ def test_public_dataset_pipeline_privacy_preserving():
     summary = report.to_dict()
     assert "total_records" in summary
     assert "dictionary_base_frequency" in summary
+
+
+def test_import_research_dataset_headerless_wordlist(tmp_path):
+    # Test file with no header starting directly with a password (e.g. '12345')
+    raw_file = tmp_path / "raw_wordlist.txt"
+    raw_file.write_text("12345\nabc123\npassword!\nqwerty2024\n", encoding="utf-8")
+
+    report = import_research_dataset(raw_file)
+    assert report.total_records == 4
+    assert report.mean_length > 0
+    summary = report.summary_table()
+    assert len(summary) > 0
+
+
+def test_import_research_dataset_tsv_and_quotes(tmp_path):
+    # Test TSV and quotes
+    tsv_file = tmp_path / "data.tsv"
+    tsv_file.write_text('"password"\t"source"\n"P@ss123"\t"leak1"\n"secret!"\t"leak2"\n', encoding="utf-8")
+
+    report = import_research_dataset(tsv_file)
+    assert report.total_records == 2
+    assert "leak1" in report.source_distribution
+

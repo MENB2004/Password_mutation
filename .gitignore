@@ -5,3 +5,4 @@ venv/
 .env
 .streamlit/
 .pytest_cache/
+data/uploaded_*

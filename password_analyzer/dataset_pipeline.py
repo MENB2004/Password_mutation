@@ -59,16 +59,17 @@ class DatasetAggregateReport:
 
 def import_research_dataset(file_path: Union[str, Path],
                             dataset_type: str = "REAL/PUBLIC RESEARCH DATA",
-                            dataset_name: Optional[str] = None) -> DatasetAggregateReport:
-    """Import and analyze an external or public research password dataset.
+                            dataset_name: Optional[str] = None,
+                            max_rows: Optional[int] = None) -> DatasetAggregateReport:
+    """Import and analyze an external or public research password dataset or wordlist.
 
-    Expected CSV schema (flexible):
-      - 'password' OR 'password_or_pattern'
-      - optional: 'source', 'source_group', 'group'
-      - optional: 'label', 'category'
+    Supported schemas & formats:
+      - CSV / TSV with headers: 'password', 'password_or_pattern', 'pwd', 'text', etc.
+      - Single-column CSV / TXT wordlists (with or without headers)
+      - Colon or comma-delimited credential lists (e.g. user:password)
 
     PRIVACY & ETHICAL GUARANTEE:
-      Individual raw passwords are NOT printed, logged, or exposed.
+      Individual raw passwords are NOT printed, logged, or exposed in reports/UI.
       Only aggregate population distributions are returned.
     """
     path = Path(file_path)
@@ -76,6 +77,15 @@ def import_research_dataset(file_path: Union[str, Path],
         raise FileNotFoundError(f"Dataset file not found: {file_path}")
 
     d_name = dataset_name or path.stem
+
+    KNOWN_PW_HEADERS = {
+        "password", "password_or_pattern", "passwords", "pwd", "pword", "pw",
+        "text", "credential", "credentials", "secret", "secrets", "plaintext",
+        "cleartext", "val", "value", "user_password", "passwd"
+    }
+    KNOWN_SRC_HEADERS = {
+        "source", "source_group", "source/group", "group", "dataset", "leak", "origin", "label", "category"
+    }
 
     total = 0
     dict_count = 0
@@ -94,61 +104,134 @@ def import_research_dataset(file_path: Union[str, Path],
     zxcvbn_dist: Dict[int, int] = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
     source_dist: Dict[str, int] = {}
 
+    def process_entry(raw_pw: str, src_label: str = "unspecified"):
+        nonlocal total, dict_count, mut_count, cap_count, sub_count, num_count, sym_count
+        cleaned_pw = raw_pw.strip().strip('"\'')
+        if not cleaned_pw:
+            return
+
+        total += 1
+        source_dist[src_label] = source_dist.get(src_label, 0) + 1
+
+        # Perform internal analysis (in-memory, never persisted to logs/UI)
+        analysis = analyze_password(cleaned_pw)
+        est = get_existing_estimator_assessment(cleaned_pw)
+
+        lengths.append(analysis.password_length)
+        entropies.append(analysis.entropy_bits)
+        mvs_list.append(analysis.mvs)
+        emp_mvs_list.append(analysis.empirical_mvs)
+        psi_list.append(analysis.psi)
+        emp_psi_list.append(analysis.empirical_psi)
+
+        z_score = est["score"]
+        zxcvbn_dist[z_score] = zxcvbn_dist.get(z_score, 0) + 1
+
+        if analysis.dictionary_base:
+            dict_count += 1
+        if analysis.mutations:
+            mut_count += 1
+        if "capitalization" in analysis.mutations:
+            cap_count += 1
+        if "character substitution" in analysis.mutations:
+            sub_count += 1
+        if "numeric suffix" in analysis.mutations:
+            num_count += 1
+        if "symbol suffix" in analysis.mutations:
+            sym_count += 1
+
     with open(path, mode="r", encoding="utf-8", errors="replace") as f:
-        reader = csv.DictReader(f)
-        if not reader.fieldnames:
-            raise ValueError("CSV file is empty or missing headers.")
+        # Read the first non-empty lines to detect structure
+        sample_line = ""
+        for line in f:
+            if line.strip():
+                sample_line = line.strip()
+                break
 
-        # Resolve field names flexibly
-        pw_field = next(
-            (c for c in reader.fieldnames if c.lower() in ["password", "password_or_pattern", "pwd", "text"]),
-            None
-        )
-        if not pw_field:
-            raise ValueError(
-                f"Missing required password column. Expected one of: 'password', 'password_or_pattern'. Found: {reader.fieldnames}"
-            )
+        if not sample_line:
+            raise ValueError("CSV or dataset file is empty.")
 
-        src_field = next(
-            (c for c in reader.fieldnames if c.lower() in ["source", "source_group", "source/group", "group"]),
-            None
-        )
+        f.seek(0)
 
+        # Detect delimiter
+        delimiter = ","
+        if "\t" in sample_line:
+            delimiter = "\t"
+        elif ";" in sample_line and "," not in sample_line:
+            delimiter = ";"
+        elif "|" in sample_line and "," not in sample_line:
+            delimiter = "|"
+
+        reader = csv.reader(f, delimiter=delimiter)
+        try:
+            first_row = next(reader)
+        except StopIteration:
+            raise ValueError("CSV file is empty.")
+
+        first_row_clean = [c.strip().strip('"\'') for c in first_row]
+
+        # Determine if first row is a header
+        is_header = False
+        pw_col_idx = 0
+        src_col_idx: Optional[int] = None
+
+        if len(first_row_clean) == 1:
+            if first_row_clean[0].lower() in KNOWN_PW_HEADERS:
+                is_header = True
+                pw_col_idx = 0
+            else:
+                is_header = False
+                pw_col_idx = 0
+        else:
+            # Multi-column check
+            for idx, col in enumerate(first_row_clean):
+                if col.lower() in KNOWN_PW_HEADERS:
+                    pw_col_idx = idx
+                    is_header = True
+                    break
+
+            if not is_header:
+                for idx, col in enumerate(first_row_clean):
+                    col_lower = col.lower()
+                    if "password" in col_lower or "pwd" in col_lower:
+                        pw_col_idx = idx
+                        is_header = True
+                        break
+
+            if is_header:
+                for idx, col in enumerate(first_row_clean):
+                    if idx != pw_col_idx and col.lower() in KNOWN_SRC_HEADERS:
+                        src_col_idx = idx
+                        break
+            else:
+                # Headerless multi-column (e.g. user:password or user,password)
+                if len(first_row_clean) == 2:
+                    pw_col_idx = 1
+                else:
+                    pw_col_idx = 0
+                is_header = False
+
+        # If first row was data (not a header), process it immediately
+        if not is_header:
+            src_val = "unspecified"
+            if src_col_idx is not None and len(first_row_clean) > src_col_idx:
+                src_val = first_row_clean[src_col_idx]
+            if len(first_row_clean) > pw_col_idx:
+                process_entry(first_row_clean[pw_col_idx], src_val)
+
+        # Process all remaining rows
         for row in reader:
-            raw_pw = row.get(pw_field, "").strip()
-            if not raw_pw:
+            if max_rows and total >= max_rows:
+                break
+            if not row:
                 continue
 
-            total += 1
-            src = row.get(src_field, "unspecified") if src_field else "unspecified"
-            source_dist[src] = source_dist.get(src, 0) + 1
+            raw_pw = row[pw_col_idx] if len(row) > pw_col_idx else (row[0] if row else "")
+            src_val = "unspecified"
+            if src_col_idx is not None and len(row) > src_col_idx:
+                src_val = row[src_col_idx].strip().strip('"\'') or "unspecified"
 
-            # Perform internal analysis (in-memory, never persisted to logs/UI)
-            analysis = analyze_password(raw_pw)
-            est = get_existing_estimator_assessment(raw_pw)
-
-            lengths.append(analysis.password_length)
-            entropies.append(analysis.entropy_bits)
-            mvs_list.append(analysis.mvs)
-            emp_mvs_list.append(analysis.empirical_mvs)
-            psi_list.append(analysis.psi)
-            emp_psi_list.append(analysis.empirical_psi)
-
-            z_score = est["score"]
-            zxcvbn_dist[z_score] = zxcvbn_dist.get(z_score, 0) + 1
-
-            if analysis.dictionary_base:
-                dict_count += 1
-            if analysis.mutations:
-                mut_count += 1
-            if "capitalization" in analysis.mutations:
-                cap_count += 1
-            if "character substitution" in analysis.mutations:
-                sub_count += 1
-            if "numeric suffix" in analysis.mutations:
-                num_count += 1
-            if "symbol suffix" in analysis.mutations:
-                sym_count += 1
+            process_entry(raw_pw, src_val)
 
     if total == 0:
         raise ValueError("No valid password records were found in the dataset.")

@@ -318,23 +318,26 @@ with main_tabs[4]:
         create_example_public_research_dataset(example_csv_path)
 
     uploaded_file = st.file_uploader(
-        "Upload a Research Dataset CSV (schema: `password_or_pattern`, `source_group`, `label`)",
-        type=["csv"],
+        "Upload a Research Dataset CSV or Wordlist (supports CSV with 'password' column or line-by-line .txt/.csv wordlists)",
+        type=["csv", "txt"],
     )
 
+    dataset_display_name = None
     if uploaded_file is not None:
         # Save uploaded file temporarily for pipeline parsing
         temp_path = Path("data/uploaded_research_dataset.csv")
         with open(temp_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
         target_dataset_path = temp_path
+        dataset_display_name = Path(uploaded_file.name).stem
         st.success(f"Processing uploaded dataset `{uploaded_file.name}`...")
     else:
         target_dataset_path = example_csv_path
         st.caption("Displaying aggregate statistics for built-in research example dataset:")
 
     try:
-        report = import_research_dataset(target_dataset_path)
+        with st.spinner("Analyzing dataset with privacy-preserving pipeline..."):
+            report = import_research_dataset(target_dataset_path, dataset_name=dataset_display_name)
         st.dataframe(report.summary_table(), width="stretch", hide_index=True)
 
         st.subheader("Zxcvbn Score Distribution in Research Corpus")
