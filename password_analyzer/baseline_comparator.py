@@ -1,3 +1,7 @@
+"""Baseline comparison module evaluating conventional entropy meters,
+Dropbox zxcvbn (version 4.4+), and the proposed MVS / PSI framework.
+"""
+
 import math
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Any
@@ -6,6 +10,7 @@ import pandas as pd
 from .core import (
     analyze_password,
     DEFAULT_WEIGHTS,
+    DEFAULT_H_REF,
     CALIBRATED_H_REF,
     CALIBRATED_PSI_THRESHOLD,
     character_set_size,
@@ -32,7 +37,6 @@ ZXCVBN_SCORE_CATEGORIES = {
 @dataclass
 class BaselineComparison:
     """Comparison record between conventional entropy, existing estimator (zxcvbn),
-
     and the proposed MVS / PSI framework.
     """
     password: str
@@ -63,34 +67,50 @@ class BaselineComparison:
 def get_existing_estimator_assessment(password: str) -> Dict[str, Any]:
     """Obtain a local assessment using Dropbox zxcvbn without making network calls.
 
-    If zxcvbn is not installed, returns a heuristic fallback.
+    If zxcvbn is not installed or the input is empty/malformed, returns a safe fallback.
     """
-    if HAS_ZXCVBN and zxcvbn is not None:
-        res = zxcvbn.zxcvbn(password)
-        score = int(res.get("score", 0))
-        guesses = float(res.get("guesses", 1))
-        guesses_log10 = float(res.get("guesses_log10", math.log10(max(1.0, guesses))))
-        crack_times = res.get("crack_times_display", {})
-        crack_time = crack_times.get(
-            "offline_slow_hashing_1e4_per_second",
-            crack_times.get("online_no_throttling_10_per_second", "instant")
-        )
-        feedback = res.get("feedback", {})
-        warning = feedback.get("warning") or None
-        suggestions = feedback.get("suggestions") or []
-        category = ZXCVBN_SCORE_CATEGORIES.get(score, "Unknown")
+    if not password:
+        name = "Dropbox zxcvbn" if (HAS_ZXCVBN and zxcvbn is not None) else "Heuristic Estimator"
         return {
-            "name": "Dropbox zxcvbn",
-            "score": score,
-            "normalized": float(score * 25.0),
-            "guesses_log10": guesses_log10,
-            "crack_time": str(crack_time),
-            "category": category,
-            "warning": warning,
-            "suggestions": suggestions,
+            "name": name,
+            "score": 0,
+            "normalized": 0.0,
+            "guesses_log10": 0.0,
+            "crack_time": "instant",
+            "category": ZXCVBN_SCORE_CATEGORIES[0],
+            "warning": "Password cannot be empty.",
+            "suggestions": ["Enter a non-empty test password."],
         }
 
-    # Heuristic fallback if zxcvbn library is absent
+    if HAS_ZXCVBN and zxcvbn is not None:
+        try:
+            res = zxcvbn.zxcvbn(password)
+            score = int(res.get("score", 0))
+            guesses = float(res.get("guesses", 1))
+            guesses_log10 = float(res.get("guesses_log10", math.log10(max(1.0, guesses))))
+            crack_times = res.get("crack_times_display", {})
+            crack_time = crack_times.get(
+                "offline_slow_hashing_1e4_per_second",
+                crack_times.get("online_no_throttling_10_per_second", "instant")
+            )
+            feedback = res.get("feedback", {})
+            warning = feedback.get("warning") or None
+            suggestions = feedback.get("suggestions") or []
+            category = ZXCVBN_SCORE_CATEGORIES.get(score, "Unknown")
+            return {
+                "name": "Dropbox zxcvbn",
+                "score": score,
+                "normalized": float(score * 25.0),
+                "guesses_log10": guesses_log10,
+                "crack_time": str(crack_time),
+                "category": category,
+                "warning": warning,
+                "suggestions": suggestions,
+            }
+        except Exception:
+            pass  # Fall through to heuristic fallback if zxcvbn fails on malformed input
+
+    # Heuristic fallback if zxcvbn library is absent or fails
     pool = character_set_size(password)
     h = entropy(password)
     score = min(4, max(0, int(h // 20)))
@@ -98,7 +118,7 @@ def get_existing_estimator_assessment(password: str) -> Dict[str, Any]:
         "name": "Heuristic Estimator (zxcvbn not installed)",
         "score": score,
         "normalized": float(score * 25.0),
-        "guesses_log10": h * 0.30103,
+        "guesses_log10": round(h * 0.30103, 2),
         "crack_time": "Estimated offline",
         "category": ZXCVBN_SCORE_CATEGORIES.get(score, "Unknown"),
         "warning": None,
@@ -112,7 +132,13 @@ def generate_explanation(analysis, est_res: Dict[str, Any]) -> str:
     muts = analysis.mutations
     h = analysis.entropy_bits
 
-    if p or muts or analysis.mvs > 0:
+    if analysis.password_length == 0:
+        return (
+            "This test input is empty. An empty password has an exhausted search space (0 combinations), "
+            f"0.00 bits of theoretical entropy, and PSI: 0.0/100 ({analysis.risk_category}). "
+            f"Existing estimator ({est_res['name']}) scores it {est_res['score']}/4 ('{est_res['category']}')."
+        )
+    elif p or muts or analysis.mvs > 0:
         base_desc = f"dictionary root '{p}'" if p else "predictable structural pattern"
         mut_desc = f"alongside predictable mutations ({', '.join(muts)})" if muts else "with no subsequent mutations"
         return (
@@ -145,7 +171,6 @@ def compare_password(password: str,
                      weights: Optional[Dict[str, float]] = None,
                      h_ref: float = 80.0) -> BaselineComparison:
     """Compare a single password across Conventional Entropy, Existing Estimator (zxcvbn),
-
     Proposed MVS, and Proposed PSI.
     """
     analysis = analyze_password(password, weights=weights, h_ref=h_ref)
@@ -153,10 +178,13 @@ def compare_password(password: str,
 
     # Conventional length/diversity score (0-100)
     # Conventional meters award ~25 points for length >=8, and ~25 per character class
-    types_count = sum(1 for v in analysis.character_types.values() if v)
-    len_pts = min(25.0, (analysis.password_length / 12.0) * 25.0)
-    class_pts = (types_count / 4.0) * 75.0
-    conv_score = min(100.0, len_pts + class_pts)
+    if analysis.password_length == 0:
+        conv_score = 0.0
+    else:
+        types_count = sum(1 for v in analysis.character_types.values() if v)
+        len_pts = min(25.0, (analysis.password_length / 12.0) * 25.0)
+        class_pts = (types_count / 4.0) * 75.0
+        conv_score = min(100.0, len_pts + class_pts)
 
     explanation = generate_explanation(analysis, est_res)
 
@@ -187,7 +215,6 @@ def compare_password(password: str,
 def compare_benchmark_passwords(weights: Optional[Dict[str, float]] = None,
                                 h_ref: float = 80.0) -> List[BaselineComparison]:
     """Compare the three canonical benchmark passwords:
-
     1. 'Password123!' (Predictable suffix mutation)
     2. 'vQ7mK2xR9zP4' (Random-like control)
     3. 'P@ssword2026!' (Complex combination mutation)

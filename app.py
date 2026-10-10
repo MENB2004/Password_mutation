@@ -35,9 +35,11 @@ st.caption(
     "empirical probability estimation (Phase 3), and held-out calibration (Phase 5)."
 )
 
-st.info(
-    "**Local Analysis Only**: All analysis runs locally on your machine. "
-    "Do not enter actual real-world account credentials. Use safe synthetic or test examples."
+st.warning(
+    "⚠️ **Security & Demonstration Notice**: "
+    "When running locally (`streamlit run app.py`), processing executes entirely within your local Python runtime. "
+    "When accessed via the public Streamlit Cloud deployment, inputs are processed ephemerally in-memory by the hosted server without persistence or external API calls. "
+    "**Never submit real-world production passwords or sensitive credentials to this public academic demonstration.** Always use synthetic test examples."
 )
 
 # Sidebar: Configuration
@@ -66,6 +68,11 @@ with st.sidebar.expander("Adjust Mutation Weights", expanded=(profile_name == "C
             value=float(default),
             step=0.05,
         )
+    if sum(weights.values()) <= 0:
+        st.sidebar.warning("⚠️ Weights must sum to a positive value. Using defaults.")
+        weights = DEFAULT_WEIGHTS.copy()
+    else:
+        st.sidebar.caption("💡 Custom weights are normalized to sum to 1.0 (100%) across the 5 features.")
 
 # Reference entropy configuration
 st.sidebar.subheader("Entropy Normalization")
@@ -143,9 +150,12 @@ with main_tabs[0]:
             st.subheader("1. PASSWORD ANALYSIS")
             st.write(f"• **Length ($L$):** `{comp.length}` characters")
             classes_detected = [k for k, v in analysis.character_types.items() if v]
-            st.write(f"• **Character classes:** {', '.join(f'`{c}`' for c in classes_detected)}")
+            st.write(f"• **Character classes:** {', '.join(f'`{c}`' for c in classes_detected) if classes_detected else '`None`'}")
             st.write(f"• **Character pool ($N$):** `{comp.character_pool}` possible characters")
-            st.write(f"• **Search space ($S = N^L$):** `{analysis.search_space:,}` combinations")
+            if analysis.password_length > 200:
+                st.write(f"• **Search space ($S = N^L$):** `> 10^{int(analysis.password_length * math.log10(max(1, analysis.character_set_size)))}` combinations")
+            else:
+                st.write(f"• **Search space ($S = N^L$):** `{analysis.search_space:,}` combinations")
             st.write(f"• **Theoretical entropy ($H$):** `{comp.entropy:.2f}` bits")
 
         # 2. PREDICTABLE MUTATION ANALYSIS
@@ -156,6 +166,9 @@ with main_tabs[0]:
             st.write(f"• **Substitution:** `{'Detected' if 'character substitution' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('substitution', 0.0):.2f})")
             st.write(f"• **Numeric suffix:** `{'Detected' if 'numeric suffix' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('numeric_suffix', 0.0):.2f})")
             st.write(f"• **Symbol suffix:** `{'Detected' if 'symbol suffix' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('symbol_suffix', 0.0):.2f})")
+            extra_patterns = [m for m in analysis.mutations if m not in ('capitalization', 'character substitution', 'numeric suffix', 'symbol suffix')]
+            if extra_patterns:
+                st.write(f"• **Structural patterns:** `{', '.join(extra_patterns)}`")
             st.write(f"• **Mutation Vulnerability Score (MVS):** `{comp.mvs:.1f}/100`")
             st.write(f"• **Empirical MVS (Phase 3):** `{comp.empirical_mvs:.1f}/100`")
 
@@ -177,6 +190,7 @@ with main_tabs[0]:
             st.write(f"• **Conventional entropy assessment:** `{comp.conventional_score:.1f}/100` ({comp.entropy:.2f} bits)")
             st.write(f"• **Existing estimator ({comp.existing_estimator_name}):** `{comp.existing_estimator_score}/4` — *{comp.existing_estimator_category}*")
             st.write(f"• **Estimated offline crack time:** `{comp.existing_estimator_crack_time_display}` (log10 guesses: {comp.existing_estimator_guesses_log10:.2f})")
+            st.caption("*(Note: zxcvbn offline crack-time estimates assume 10,000 guesses/second hashing and do not reflect distributed GPU/ASIC cluster capabilities)*")
             st.write(f"• **Proposed PSI:** `{comp.psi:.1f}/100`")
 
         # 5. EXPLANATION
@@ -186,6 +200,8 @@ with main_tabs[0]:
             st.warning(f"**Vulnerability Finding**: {comp.explanation}")
         else:
             st.success(f"**Security Finding**: {comp.explanation}")
+    else:
+        st.info("💡 Enter a test password above or choose a sample password from the sidebar to inspect its analysis.")
 
 # TAB 2: THREE-PASSWORD BENCHMARK COMPARISON (Task 7)
 with main_tabs[1]:
@@ -247,30 +263,45 @@ with main_tabs[2]:
         "controlled synthetic corpus, and information content $I_i = -\\log_2(\\hat{p}_i)$ in bits."
     )
 
-    sample_analysis = analyze_password(default_input, weights=weights, h_ref=h_ref)
+    target_input = password_input if password_input else default_input
+    sample_analysis = analyze_password(target_input, weights=weights, h_ref=h_ref)
     table_rows = []
+    weighted_p_sum = 0.0
+    active_w_sum = 0.0
     for component, score in sample_analysis.mutation_components.items():
         prob = sample_analysis.empirical_probabilities.get(component, 0.0)
         surp = sample_analysis.surprisal_bits.get(component, 0.0)
         w = weights.get(component, 0.0)
+        contrib = w * prob * score
+        weighted_p_sum += contrib
+        active_w_sum += w * score
         table_rows.append({
             "Mutation Component": component.replace("_", " ").title(),
             "Active State (x_i)": f"{score:.2f}",
             "Laplace Smoothed Frequency (p̂_i)": f"{prob:.4f}",
             "Surprisal / Info Content (I_i)": f"{surp:.2f} bits",
             "Assigned Weight (w_i)": f"{w:.2f}",
-            "Weighted Probability Contribution": f"{(w * prob * score):.4f}",
+            "Weighted Component (w_i · p̂_i · x_i)": f"{contrib:.4f}",
         })
 
     df_empirical = pd.DataFrame(table_rows)
     st.dataframe(df_empirical, width="stretch", hide_index=True)
 
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Numerator Sum (Σ w_i · p̂_i · x_i)", f"{weighted_p_sum:.4f}")
+    c2.metric("Denominator Sum (Σ w_i · x_i)", f"{active_w_sum:.4f}")
+    c3.metric("Normalized Empirical MVS", f"{sample_analysis.empirical_mvs:.1f}/100")
+
     st.markdown(
-        """
-        - **Low Surprisal ($\approx 1.22$ bits)**: Capitalization and character substitution occur frequently in predictable passwords.
-        - **Higher Surprisal ($\approx 1.79$ bits)**: Trailing symbols occur less frequently than plain numbers alone.
-        - **Formula**:
+        r"""
+        ### Component Metric Definitions
+        - **Active State ($x_i$)**: Indicator / degree of presence ($0.0 \\dots 1.0$) for mutation feature $i$.
+        - **Laplace-Smoothed Empirical Frequency ($\hat{p}_i$)**: Frequency $\\hat{p}_i = \\frac{k_i + 1}{n + 2}$ computed from the controlled Phase 3 training corpus.
+        - **Information Surprisal ($I_i$)**: Surprisal $I_i = -\\log_2(\\hat{p}_i)$ in bits. Common mutations (e.g. TitleCase, single digits) carry low surprisal ($\\approx 1.22$ bits), while rare mutations carry higher surprisal.
+        - **Weighted Component ($w_i \\cdot \\hat{p}_i \\cdot x_i$)**: The unnormalized numerator contribution of component $i$.
+        - **Normalized Empirical MVS**:
         $$\\text{MVS}_{\\text{emp}} = 100 \\times \\frac{\\sum w_i \\hat{p}_i x_i}{\\sum w_i x_i}$$
+        *(When no features are active, $\\sum w_i x_i = 0$ and $\\text{MVS}_{\\text{emp}} = 0.0$)*
         """
     )
 
@@ -318,37 +349,50 @@ with main_tabs[4]:
         create_example_public_research_dataset(example_csv_path)
 
     uploaded_file = st.file_uploader(
-        "Upload a Research Dataset CSV or Wordlist (supports CSV with 'password' column or line-by-line .txt/.csv wordlists)",
+        "Upload a Research Dataset CSV or Wordlist (supports CSV with 'password' column or line-by-line .txt/.csv wordlists, max 25MB)",
         type=["csv", "txt"],
     )
 
     dataset_display_name = None
+    target_dataset_path = None
+    cleanup_temp = False
+
     if uploaded_file is not None:
-        # Save uploaded file temporarily for pipeline parsing
-        temp_path = Path("data/uploaded_research_dataset.csv")
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        target_dataset_path = temp_path
-        dataset_display_name = Path(uploaded_file.name).stem
-        st.success(f"Processing uploaded dataset `{uploaded_file.name}`...")
+        if uploaded_file.size > 25 * 1024 * 1024:
+            st.error("⚠️ File size exceeds the maximum limit of 25MB.")
+        else:
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                tmp.write(uploaded_file.getbuffer())
+                target_dataset_path = Path(tmp.name)
+            cleanup_temp = True
+            dataset_display_name = Path(uploaded_file.name).stem
+            st.success(f"Processing uploaded dataset `{uploaded_file.name}` ({uploaded_file.size / 1024:.1f} KB)...")
     else:
         target_dataset_path = example_csv_path
         st.caption("Displaying aggregate statistics for built-in research example dataset:")
 
-    try:
-        with st.spinner("Analyzing dataset with privacy-preserving pipeline..."):
-            report = import_research_dataset(target_dataset_path, dataset_name=dataset_display_name)
-        st.dataframe(report.summary_table(), width="stretch", hide_index=True)
+    if target_dataset_path is not None and target_dataset_path.exists():
+        try:
+            with st.spinner("Analyzing dataset with privacy-preserving pipeline..."):
+                report = import_research_dataset(target_dataset_path, dataset_name=dataset_display_name)
+            st.dataframe(report.summary_table(), width="stretch", hide_index=True)
 
-        st.subheader("Zxcvbn Score Distribution in Research Corpus")
-        dist_df = pd.DataFrame(
-            list(report.zxcvbn_score_distribution.items()),
-            columns=["zxcvbn Score (0=Weak, 4=Strong)", "Count"],
-        )
-        st.bar_chart(dist_df.set_index("zxcvbn Score (0=Weak, 4=Strong)"))
+            st.subheader("Zxcvbn Score Distribution in Research Corpus")
+            dist_df = pd.DataFrame(
+                list(report.zxcvbn_score_distribution.items()),
+                columns=["zxcvbn Score (0=Weak, 4=Strong)", "Count"],
+            )
+            st.bar_chart(dist_df.set_index("zxcvbn Score (0=Weak, 4=Strong)"))
 
-    except Exception as e:
-        st.error(f"Error processing research dataset: {e}")
+        except Exception as e:
+            st.error(f"Error processing research dataset: {e}")
+        finally:
+            if cleanup_temp and target_dataset_path and target_dataset_path.exists():
+                try:
+                    target_dataset_path.unlink()
+                except Exception:
+                    pass
 
 # TAB 6: MATHEMATICAL MODEL DETAILS
 with main_tabs[5]:

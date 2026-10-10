@@ -36,7 +36,7 @@ We evaluate how effectively each assessment method separates predictable mutatio
 | Group | $n$ | Mean Entropy | Median Entropy | Std Entropy | Mean Conv. Score | Mean zxcvbn (0-4) | Mean MVS | Mean Emp. MVS | Mean PSI | Median PSI | Std PSI | Min PSI | Max PSI |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Synthetic Random-Like Controls** | 225 | 76.74 | 77.40 | 17.56 | 90.92 | 3.56 | 0.00 | 0.00 | 88.34 | 96.76 | 13.74 | 57.00 | 100.00 |
-| **Predictable Mutation Families** | 105 | 45.03 | 44.75 | 10.99 | 58.53 | 0.82 | 56.57 | 33.09 | 23.30 | 23.26 | 7.01 | 5.33 | 36.25 |
+| **Predictable Mutation Families** | 105 | 45.03 | 44.75 | 10.99 | 58.53 | 0.82 | 55.71 | 33.01 | 23.88 | 23.26 | 5.96 | 9.69 | 36.25 |
 
 ---
 
@@ -49,7 +49,7 @@ We evaluate how effectively each assessment method separates predictable mutatio
 | `capitalization+symbol_suffix` | 15 | 48.58 | 6.75 | 60.00 | 24.29 | 22.37 | 3.37 | 19.18 | 28.77 | 1.00 |
 | `dictionary_only` | 15 | 31.02 | 4.96 | 35.00 | 25.21 | 22.91 | 4.03 | 19.10 | 30.55 | 0.00 |
 | `numeric_suffix` | 15 | 48.60 | 8.69 | 55.00 | 27.34 | 26.17 | 4.89 | 20.36 | 34.90 | 1.13 |
-| `substitution+numeric_suffix` | 15 | 49.66 | 9.39 | 81.00 | 11.49 | 11.31 | 4.75 | 5.33 | 19.39 | 1.20 |
+| `substitution+numeric_suffix` | 15 | 49.66 | 9.39 | 75.00 | 15.52 | 17.12 | 2.94 | 9.69 | 19.39 | 1.20 |
 | `symbol_suffix` | 15 | 44.52 | 6.18 | 45.00 | 30.61 | 28.19 | 4.25 | 24.16 | 36.25 | 1.00 |
 | `synthetic_random_like` | 225 | 76.74 | 17.56 | 0.00 | 88.34 | 96.76 | 13.74 | 57.00 | 100.00 | 3.56 |
 

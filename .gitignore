@@ -1,8 +1,72 @@
+# Byte-compiled / optimized / Python runtime
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+
+# Virtual Environments
 .venv/
 venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment variables & local secrets
 .env
+.env.*
+!.env.example
+*.local
+
+# Streamlit local settings & secrets
 .streamlit/
+
+# Testing & Coverage
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# User data & transient uploads
 data/uploaded_*
+data/temp_*
+*.tmp
+*.temp
+
+# Log files
+*.log
+logs/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.claude/
+
+# Operating System artifacts
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
