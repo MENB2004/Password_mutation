@@ -11,11 +11,16 @@ from password_analyzer import (
     evaluate_calibrated_psi,
     compare_password,
     compare_benchmark_passwords,
+    build_comparison_dataframe,
+    get_existing_estimator_assessment,
     import_research_dataset,
+    empirical_probability,
+    surprisal,
     DEFAULT_WEIGHTS,
     DEFAULT_EMPIRICAL_PROBABILITIES,
     DEFAULT_SURPRISAL_BITS,
     WEIGHT_PROFILES,
+    DEFAULT_H_REF,
     CALIBRATED_H_REF,
     CALIBRATED_PSI_THRESHOLD,
 )
@@ -468,5 +473,344 @@ def test_simple_passwords_vulnerability_detection():
     short_res = analyze_password("cat")
     assert short_res.dictionary_base == "cat"
     assert short_res.risk_category == "High predictability risk"
+
+
+# ==============================================================================
+# 16. COMPREHENSIVE REGRESSION TESTS (PROMPT REQUIREMENTS 2, 3, 4, 5, 6, 7, 8)
+# ==============================================================================
+
+def test_regression_dictionary_word_with_numeric_suffix():
+    """A dictionary word with a numeric suffix (e.g. password123, admin2026)."""
+    res = analyze_password("password123")
+    assert res.dictionary_base == "password"
+    assert "numeric suffix" in res.mutations
+    assert "symbol suffix" not in res.mutations
+    assert "capitalization" not in res.mutations
+    assert "character substitution" not in res.mutations
+    assert res.mutation_components["numeric_suffix"] == 1.0
+    assert res.mutation_components["symbol_suffix"] == 0.0
+    assert res.mutation_components["capitalization"] == 0.0
+    assert res.mutation_components["substitution"] == 0.0
+    assert res.mutation_components["dictionary_base"] == 1.0
+    # Expected MVS: 100 * (0.35 * 1.0 + 0.20 * 1.0) = 55.0
+    assert math.isclose(res.mvs, 55.0, abs_tol=1e-5)
+
+
+def test_regression_dictionary_word_with_numeric_and_symbol_suffix():
+    """A dictionary word with numeric suffix followed by trailing symbol(s).
+
+    Tests 'Password123!', 'password123!', 'welcome2026#', 'admin42.'.
+    Must correctly detect numeric suffix before trailing symbols and distinguish both.
+    """
+    for pw, base in [
+        ("Password123!", "password"),
+        ("password123!", "password"),
+        ("welcome2026#", "welcome"),
+        ("admin42.", "admin"),
+        ("summer99$!@", "summer"),
+    ]:
+        res = analyze_password(pw)
+        assert res.dictionary_base == base, f"Failed base detection for {pw}"
+        assert "numeric suffix" in res.mutations, f"Failed numeric suffix for {pw}"
+        assert "symbol suffix" in res.mutations, f"Failed symbol suffix for {pw}"
+        assert res.mutation_components["numeric_suffix"] == 1.0
+        assert res.mutation_components["symbol_suffix"] == 1.0
+
+    # Specifically verify Password123! component breakdown
+    res_canonical = analyze_password("Password123!")
+    assert res_canonical.mutation_components["dictionary_base"] == 1.0
+    assert res_canonical.mutation_components["capitalization"] == 1.0
+    assert res_canonical.mutation_components["substitution"] == 0.0
+    assert res_canonical.mutation_components["numeric_suffix"] == 1.0
+    assert res_canonical.mutation_components["symbol_suffix"] == 1.0
+    # MVS = 100 * (0.35 + 0.15 + 0.20 + 0.10) = 80.0
+    assert math.isclose(res_canonical.mvs, 80.0, abs_tol=1e-5)
+
+
+def test_regression_dictionary_word_with_capitalization():
+    """A dictionary word with capitalization (TitleCase and mixed-case)."""
+    # TitleCase
+    res_title = analyze_password("Password")
+    assert res_title.dictionary_base == "password"
+    assert "capitalization" in res_title.mutations
+    assert res_title.mutation_components["capitalization"] == 1.0
+    assert res_title.mutation_components["numeric_suffix"] == 0.0
+    assert res_title.mutation_components["symbol_suffix"] == 0.0
+
+    # Mixed-case
+    res_mixed = analyze_password("passWord")
+    assert res_mixed.dictionary_base == "password"
+    assert "capitalization" in res_mixed.mutations
+    assert res_mixed.mutation_components["capitalization"] == 0.7
+
+
+def test_regression_dictionary_word_with_supported_character_substitution():
+    """A dictionary word with supported leetspeak character substitutions."""
+    for pw, base in [
+        ("p@ssword", "password"),
+        ("adm1n", "admin"),
+        ("dr4g0n", "dragon"),
+        ("w3lc0m3", "welcome"),
+        ("s3cur1ty", "security"),
+    ]:
+        res = analyze_password(pw)
+        assert res.dictionary_base == base, f"Failed base for {pw}"
+        assert "character substitution" in res.mutations, f"Failed substitution for {pw}"
+        assert res.mutation_components["substitution"] == 1.0
+
+
+def test_regression_dictionary_word_with_symbol_suffix():
+    """A dictionary word with symbol suffix only (no numeric suffix)."""
+    for pw, base in [
+        ("password!", "password"),
+        ("Password!", "password"),
+        ("welcome#", "welcome"),
+        ("admin!@#", "admin"),
+    ]:
+        res = analyze_password(pw)
+        assert res.dictionary_base == base
+        assert "symbol suffix" in res.mutations
+        assert "numeric suffix" not in res.mutations
+        assert res.mutation_components["symbol_suffix"] == 1.0
+        assert res.mutation_components["numeric_suffix"] == 0.0
+
+
+def test_regression_random_looking_password_with_uppercase_and_digits():
+    """A random-looking password containing uppercase letters and digits.
+
+    Must NOT be classified as dictionary mutations. MVS must be 0.0.
+    """
+    for pw in ["vQ7mK2xR9zP4", "aX9qLm2P7vT8", "Rnd7xK9mQ2", "K7mP9wQ2xL"]:
+        res = analyze_password(pw)
+        assert res.dictionary_base is None, f"False dictionary base for {pw}"
+        assert res.mvs == 0.0, f"False MVS > 0 for {pw}"
+        assert res.empirical_mvs == 0.0
+        assert len(res.mutations) == 0, f"False mutations for {pw}: {res.mutations}"
+        for comp_name, comp_val in res.mutation_components.items():
+            assert comp_val == 0.0, f"Component {comp_name} non-zero for {pw}"
+        # Preserves high PSI
+        assert res.psi > 60.0
+
+
+def test_regression_random_looking_password_ending_in_digits_and_symbols():
+    """A random-looking password ending in digits and symbols.
+
+    Must NOT be penalized merely because it contains trailing numbers or symbols.
+    """
+    for pw in ["xK9#mQ2$vL8*", "xK9#mQ2$vL89!", "kLzXwP99", "th5nRk#wfF44^", "rAnD0m!123#"]:
+        res = analyze_password(pw)
+        assert res.dictionary_base is None, f"False dictionary base for {pw}"
+        assert res.mvs == 0.0, f"False MVS for {pw}: {res.mvs}"
+        assert len(res.mutations) == 0, f"False mutations for {pw}: {res.mutations}"
+        assert res.mutation_components["numeric_suffix"] == 0.0
+        assert res.mutation_components["symbol_suffix"] == 0.0
+
+
+def test_regression_empty_input():
+    """Empty string input must be handled safely across all functions."""
+    res = analyze_password("")
+    assert res.password_length == 0
+    assert res.character_set_size == 0
+    assert res.search_space == 0
+    assert res.entropy_bits == 0.0
+    assert res.mvs == 0.0
+    assert res.psi == 0.0
+    assert res.dictionary_base is None
+    assert len(res.mutations) == 0
+
+    # Baseline comparison must also handle empty string safely without crashing
+    comp = compare_password("")
+    assert comp.length == 0
+    assert comp.entropy == 0.0
+    assert comp.mvs == 0.0
+    assert comp.psi == 0.0
+    assert "empty" in comp.explanation.lower()
+    assert comp.existing_estimator_score == 0
+
+
+def test_regression_very_short_passwords():
+    """Very short passwords (1-3 characters)."""
+    for pw in ["a", "1", "!", "ab", "12", "cat"]:
+        res = analyze_password(pw)
+        assert res.password_length == len(pw)
+        assert res.search_space > 0
+        assert res.entropy_bits > 0
+        # Because length < 8, risk category must be high predictability risk
+        assert res.risk_category == "High predictability risk"
+
+
+def test_regression_unicode_input():
+    """Unicode inputs with non-ASCII letters or special symbols."""
+    res_unicode = analyze_password("Pässw0rd123!")
+    assert res_unicode.password_length == len("Pässw0rd123!")
+    assert res_unicode.character_set_size > 0
+    assert res_unicode.entropy_bits > 0.0
+    assert 0.0 <= res_unicode.mvs <= 100.0
+    assert 0.0 <= res_unicode.psi <= 100.0
+
+    res_symbol = analyze_password("€123abc#")
+    assert res_symbol.password_length == 8
+    assert res_symbol.character_types["symbols"] is True
+    assert res_symbol.character_set_size >= 68
+
+
+def test_regression_missing_or_unsupported_dictionary_entries():
+    """Passwords with words not in COMMON_WORDS must safely return None for base."""
+    for pw in ["unsupportedxyz123!", "nonexistentword42", "randomstring99"]:
+        res = analyze_password(pw)
+        assert res.dictionary_base is None
+        assert res.mvs == 0.0
+        assert len(res.mutations) == 0
+
+
+def test_regression_custom_and_invalid_weights():
+    """Validate weight handling, custom normalization, and rejection of invalid weights."""
+    # Valid custom weights (normalized automatically)
+    custom = {"dictionary_base": 2.0, "numeric_suffix": 2.0, "symbol_suffix": 0.0, "capitalization": 0.0, "substitution": 0.0}
+    res = analyze_password("password123", weights=custom)
+    # Total weight is 4.0; dictionary_base normalized to 0.5, numeric_suffix to 0.5.
+    # MVS = 100 * (1.0 * 0.5 + 1.0 * 0.5) = 100.0
+    assert math.isclose(res.mvs, 100.0, abs_tol=1e-5)
+
+    # Empty weights dictionary
+    with pytest.raises(ValueError):
+        calculate_mvs({"dictionary_base": 1.0}, weights={})
+
+    # Negative weight
+    with pytest.raises(ValueError):
+        calculate_mvs({"dictionary_base": 1.0}, weights={"dictionary_base": -0.5, "numeric_suffix": 1.0})
+
+    # Zero total weight
+    with pytest.raises(ValueError):
+        calculate_mvs({"dictionary_base": 1.0}, weights={"dictionary_base": 0.0, "numeric_suffix": 0.0})
+
+
+def test_regression_invalid_h_ref_values():
+    """h_ref <= 0, NaN, or Inf must raise ValueError."""
+    for invalid_href in [0.0, -10.0, float("nan"), float("inf"), float("-inf")]:
+        with pytest.raises(ValueError):
+            calculate_psi(h_bits=50.0, mvs=20.0, h_ref=invalid_href)
+        with pytest.raises(ValueError):
+            analyze_password("password", h_ref=invalid_href)
+
+
+def test_regression_search_space_and_entropy_calculations():
+    """Mathematical validation: S = N^L and H = L * log2(N)."""
+    # 8 lowercase letters: N = 26, L = 8
+    res = analyze_password("abcdefgh")
+    assert res.character_set_size == 26
+    assert res.password_length == 8
+    assert res.search_space == 26 ** 8
+    assert math.isclose(res.entropy_bits, 8 * math.log2(26), rel_tol=1e-6)
+
+    # 12 characters across all 4 classes: N = 94, L = 12
+    res_full = analyze_password("Abc123!@#xyz")
+    assert res_full.character_set_size == 94
+    assert res_full.password_length == 12
+    assert res_full.search_space == 94 ** 12
+    assert math.isclose(res_full.entropy_bits, 12 * math.log2(94), rel_tol=1e-6)
+
+
+def test_regression_mvs_and_psi_mathematical_ranges():
+    """Verify MVS and PSI strictly stay within [0.0, 100.0] across extreme inputs."""
+    # Extreme zero entropy
+    assert calculate_psi(h_bits=0.0, mvs=0.0, h_ref=80.0) == 0.0
+    assert calculate_psi(h_bits=0.0, mvs=100.0, h_ref=80.0) == 0.0
+
+    # Very high entropy
+    psi_high = calculate_psi(h_bits=500.0, mvs=0.0, h_ref=80.0)
+    assert psi_high == 100.0  # capped at 100.0
+
+    # Clamping tests
+    psi_penalized = calculate_psi(h_bits=80.0, mvs=100.0, h_ref=80.0)
+    assert psi_penalized == 0.0
+
+    # Extreme component values
+    extreme_comps = {k: 5.0 for k in DEFAULT_WEIGHTS}
+    mvs_extreme = calculate_mvs(extreme_comps)
+    assert 0.0 <= mvs_extreme <= 100.0
+
+
+def test_regression_agreement_detected_features_components_and_explanations():
+    """Ensure every feature with score > 0 is in mutations list and explained."""
+    test_passwords = [
+        "Password123!",
+        "password",
+        "p@ssword",
+        "password!",
+        "vQ7mK2xR9zP4",
+        "P@ssword2026!",
+    ]
+    for pw in test_passwords:
+        res = analyze_password(pw)
+        comp = compare_password(pw)
+
+        # 1. Indicator agreement: score > 0 <==> mutation label present
+        if res.mutation_components["capitalization"] > 0:
+            assert "capitalization" in res.mutations
+        if res.mutation_components["substitution"] > 0:
+            assert "character substitution" in res.mutations
+        if res.mutation_components["numeric_suffix"] > 0:
+            assert "numeric suffix" in res.mutations
+        if res.mutation_components["symbol_suffix"] > 0:
+            assert "symbol suffix" in res.mutations
+
+        # 2. Score range
+        assert 0.0 <= res.mvs <= 100.0
+        assert 0.0 <= res.psi <= 100.0
+
+        # 3. Explanation contains MVS and PSI
+        assert f"{res.mvs:.1f}/100" in comp.explanation
+        assert f"{res.psi:.1f}/100" in comp.explanation
+
+
+def test_regression_zxcvbn_behaviour():
+    """Verify zxcvbn behavior, feedback, crack times, and heuristic fallback resilience."""
+    assessment = get_existing_estimator_assessment("Password123!")
+    assert assessment["name"] == "Dropbox zxcvbn"
+    assert 0 <= assessment["score"] <= 4
+    assert 0.0 <= assessment["normalized"] <= 100.0
+    assert assessment["guesses_log10"] > 0
+    assert len(assessment["crack_time"]) > 0
+
+    # Empty string resilience
+    empty_assessment = get_existing_estimator_assessment("")
+    assert empty_assessment["score"] == 0
+    assert empty_assessment["normalized"] == 0.0
+
+
+def test_regression_empirical_probability_and_surprisal():
+    """Validate empirical probability estimator p_hat = (k + 1) / (n + 2) and surprisal."""
+    # Standard valid calculation
+    p = empirical_probability(10, 100)
+    assert math.isclose(p, 11 / 102, rel_tol=1e-6)
+    assert 0.0 < p < 1.0
+
+    # Boundary: k = 0
+    p_zero = empirical_probability(0, 10)
+    assert math.isclose(p_zero, 1 / 12, rel_tol=1e-6)
+
+    # Boundary: k = n
+    p_full = empirical_probability(10, 10)
+    assert math.isclose(p_full, 11 / 12, rel_tol=1e-6)
+
+    # Surprisal
+    assert math.isclose(surprisal(0.5), 1.0, rel_tol=1e-6)
+    assert math.isclose(surprisal(1.0), 0.0, abs_tol=1e-6)
+
+    # Validation errors
+    with pytest.raises(ValueError):
+        empirical_probability(15, 10)  # k > n
+    with pytest.raises(ValueError):
+        empirical_probability(-1, 10)  # negative k
+    with pytest.raises(ValueError):
+        empirical_probability(5, -10)  # negative n
+    with pytest.raises(TypeError):
+        empirical_probability(5.5, 10)  # non-integer
+    with pytest.raises(ValueError):
+        surprisal(0.0)  # p <= 0
+    with pytest.raises(ValueError):
+        surprisal(1.5)  # p > 1
+
 
 

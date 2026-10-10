@@ -66,6 +66,9 @@ with st.sidebar.expander("Adjust Mutation Weights", expanded=(profile_name == "C
             value=float(default),
             step=0.05,
         )
+    if sum(weights.values()) <= 0:
+        st.sidebar.warning("⚠️ Weights must sum to a positive value. Using defaults.")
+        weights = DEFAULT_WEIGHTS.copy()
 
 # Reference entropy configuration
 st.sidebar.subheader("Entropy Normalization")
@@ -143,7 +146,7 @@ with main_tabs[0]:
             st.subheader("1. PASSWORD ANALYSIS")
             st.write(f"• **Length ($L$):** `{comp.length}` characters")
             classes_detected = [k for k, v in analysis.character_types.items() if v]
-            st.write(f"• **Character classes:** {', '.join(f'`{c}`' for c in classes_detected)}")
+            st.write(f"• **Character classes:** {', '.join(f'`{c}`' for c in classes_detected) if classes_detected else '`None`'}")
             st.write(f"• **Character pool ($N$):** `{comp.character_pool}` possible characters")
             st.write(f"• **Search space ($S = N^L$):** `{analysis.search_space:,}` combinations")
             st.write(f"• **Theoretical entropy ($H$):** `{comp.entropy:.2f}` bits")
@@ -156,6 +159,9 @@ with main_tabs[0]:
             st.write(f"• **Substitution:** `{'Detected' if 'character substitution' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('substitution', 0.0):.2f})")
             st.write(f"• **Numeric suffix:** `{'Detected' if 'numeric suffix' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('numeric_suffix', 0.0):.2f})")
             st.write(f"• **Symbol suffix:** `{'Detected' if 'symbol suffix' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('symbol_suffix', 0.0):.2f})")
+            extra_patterns = [m for m in analysis.mutations if m not in ('capitalization', 'character substitution', 'numeric suffix', 'symbol suffix')]
+            if extra_patterns:
+                st.write(f"• **Structural patterns:** `{', '.join(extra_patterns)}`")
             st.write(f"• **Mutation Vulnerability Score (MVS):** `{comp.mvs:.1f}/100`")
             st.write(f"• **Empirical MVS (Phase 3):** `{comp.empirical_mvs:.1f}/100`")
 
@@ -186,6 +192,8 @@ with main_tabs[0]:
             st.warning(f"**Vulnerability Finding**: {comp.explanation}")
         else:
             st.success(f"**Security Finding**: {comp.explanation}")
+    else:
+        st.info("💡 Enter a test password above or choose a sample password from the sidebar to inspect its analysis.")
 
 # TAB 2: THREE-PASSWORD BENCHMARK COMPARISON (Task 7)
 with main_tabs[1]:
@@ -247,7 +255,8 @@ with main_tabs[2]:
         "controlled synthetic corpus, and information content $I_i = -\\log_2(\\hat{p}_i)$ in bits."
     )
 
-    sample_analysis = analyze_password(default_input, weights=weights, h_ref=h_ref)
+    target_input = password_input if password_input else default_input
+    sample_analysis = analyze_password(target_input, weights=weights, h_ref=h_ref)
     table_rows = []
     for component, score in sample_analysis.mutation_components.items():
         prob = sample_analysis.empirical_probabilities.get(component, 0.0)
