@@ -228,6 +228,8 @@ password_mutation_project/
 ├── data/
 │   ├── synthetic_password_dataset_phase3.csv # Research evaluation corpus (330 passwords)
 │   ├── example_passwords.csv                # Example password dataset
+│   ├── phase5_family_disjoint_calibration_split.csv # Calibration split (6 root families, N=180)
+│   ├── phase5_family_disjoint_eval_split.csv        # Disjoint eval split (9 distinct root families, N=180)
 │   └── public_research_dataset_example.csv  # Example public research schema
 │
 ├── docs/
