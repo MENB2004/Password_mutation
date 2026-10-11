@@ -135,17 +135,25 @@ with main_tabs[0]:
             analysis = None
 
         if comp and analysis:
+            # Safely resolve PSI fixed and empirical variants with robust fallbacks
+            psi_fixed = getattr(comp, "psi_fixed_mvs", getattr(comp, "psi", 0.0))
+            psi_emp = getattr(comp, "psi_empirical_mvs", getattr(comp, "empirical_psi", 0.0))
+            cal_psi_fixed = getattr(comp, "calibrated_psi_fixed", getattr(comp, "calibrated_psi", 0.0))
+            cal_psi_emp = getattr(comp, "calibrated_psi_empirical", getattr(comp, "calibrated_psi", 0.0))
+            cal_class_fixed = getattr(comp, "calibrated_classification_fixed", getattr(comp, "our_classification", ""))
+            cal_class_emp = getattr(comp, "calibrated_classification_empirical", getattr(comp, "our_classification", ""))
+
             # High-level Metrics Row
             m1, m2, m3, m4, m5 = st.columns(5)
             m1.metric("Entropy (H)", f"{comp.entropy:.2f} bits", help="Theoretical character-pool entropy: H = L * log2(N)")
             m2.metric("Fixed MVS", f"{comp.mvs:.1f}/100", help="Baseline weighted mutation score (100 * sum(w_i * x_i))")
-            m3.metric("PSI (Fixed MVS)", f"{comp.psi_fixed_mvs:.1f}/100", help="Normalized entropy discounted by Fixed MVS")
+            m3.metric("PSI (Fixed MVS)", f"{psi_fixed:.1f}/100", help="Normalized entropy discounted by Fixed MVS")
             m4.metric(
                 f"Existing Estimator",
                 f"{comp.existing_estimator_score}/4",
                 help=f"{comp.existing_estimator_name}: {comp.existing_estimator_category}",
             )
-            m5.metric("PSI (Empirical MVS)", f"{comp.psi_empirical_mvs:.1f}/100", help="Normalized entropy discounted by Empirical MVS")
+            m5.metric("PSI (Empirical MVS)", f"{psi_emp:.1f}/100", help="Normalized entropy discounted by Empirical MVS")
 
             st.markdown("---")
 
@@ -185,11 +193,11 @@ with main_tabs[0]:
             with col_sec:
                 st.subheader("3. SECURITY INDEX")
                 st.write(f"• **Normalized entropy ($E_{{\\text{{norm}}}}$):** `{analysis.entropy_normalized:.4f}`")
-                st.write(f"• **PSI (Fixed MVS):** `{comp.psi_fixed_mvs:.1f}/100`")
-                st.write(f"• **PSI (Empirical MVS):** `{comp.psi_empirical_mvs:.1f}/100`")
+                st.write(f"• **PSI (Fixed MVS):** `{psi_fixed:.1f}/100`")
+                st.write(f"• **PSI (Empirical MVS):** `{psi_emp:.1f}/100`")
                 st.write(f"• **Risk category:** **{analysis.risk_category}**")
-                st.write(f"• **Calibrated PSI (Fixed MVS, $H_{{\\text{{ref}}}}=50$):** `{comp.calibrated_psi_fixed:.1f}/100`")
-                st.write(f"• **Calibrated PSI (Empirical MVS, $H_{{\\text{{ref}}}}=50$):** `{comp.calibrated_psi_empirical:.1f}/100`")
+                st.write(f"• **Calibrated PSI (Fixed MVS, $H_{{\\text{{ref}}}}=50$):** `{cal_psi_fixed:.1f}/100`")
+                st.write(f"• **Calibrated PSI (Empirical MVS, $H_{{\\text{{ref}}}}=50$):** `{cal_psi_emp:.1f}/100`")
                 st.write(f"• **Calibrated classification ($\\tau=69.0$):** `{comp.our_classification}`")
 
             # 4. BASELINE COMPARISON
@@ -199,7 +207,7 @@ with main_tabs[0]:
                 st.write(f"• **Existing estimator ({comp.existing_estimator_name}):** `{comp.existing_estimator_score}/4` — *{comp.existing_estimator_category}*")
                 st.write(f"• **Estimated offline crack time:** `{comp.existing_estimator_crack_time_display}` (log10 guesses: {comp.existing_estimator_guesses_log10:.2f})")
                 st.caption("*(Note: zxcvbn offline crack-time estimates assume 10,000 guesses/second hashing and do not reflect distributed GPU/ASIC cluster capabilities)*")
-                st.write(f"• **Proposed PSI (Fixed MVS):** `{comp.psi_fixed_mvs:.1f}/100`")
+                st.write(f"• **Proposed PSI (Fixed MVS):** `{psi_fixed:.1f}/100`")
 
         # 5. EXPLANATION
         st.markdown("---")

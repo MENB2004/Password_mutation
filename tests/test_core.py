@@ -1241,3 +1241,53 @@ def test_privacy_preserving_pipeline_no_password_retention():
     assert report.total_records > 0
     assert 0.0 <= report.mean_mvs <= 100.0
 
+
+def test_baseline_comparison_psi_variants_availability():
+    """Verify BaselineComparison exposes both psi_fixed_mvs and psi_empirical_mvs."""
+    from password_analyzer.baseline_comparator import compare_password, BaselineComparison
+
+    comp = compare_password("Password123!")
+    # Direct attribute availability
+    assert hasattr(comp, "psi_fixed_mvs")
+    assert hasattr(comp, "psi_empirical_mvs")
+    assert hasattr(comp, "calibrated_psi_fixed")
+    assert hasattr(comp, "calibrated_psi_empirical")
+    assert hasattr(comp, "calibrated_classification_fixed")
+    assert hasattr(comp, "calibrated_classification_empirical")
+
+    # Correct non-zero values
+    assert comp.psi_fixed_mvs == 19.7
+    assert comp.psi_empirical_mvs == 66.0
+    assert comp.calibrated_psi_fixed == 20.0
+    assert comp.calibrated_psi_empirical == 67.1
+
+    # Verify fallback resolution on legacy-constructed instances
+    legacy_comp = BaselineComparison(
+        password="TestPassword1!",
+        length=14,
+        character_pool=94,
+        entropy=75.0,
+        conventional_score=90.0,
+        mvs=40.0,
+        empirical_mvs=25.0,
+        psi=45.0,
+        empirical_psi=60.0,
+        calibrated_psi=65.0,
+        our_classification="Vulnerable",
+        existing_estimator_name="zxcvbn",
+        existing_estimator_score=2,
+        existing_estimator_normalized=50.0,
+        existing_estimator_guesses_log10=5.0,
+        existing_estimator_crack_time_display="1 hour",
+        existing_estimator_category="Fair",
+        existing_estimator_warning=None,
+        existing_estimator_suggestions=[],
+        explanation="Legacy test",
+    )
+    # Even if constructed without explicit PSI fields, post_init and __getattr__ must resolve them:
+    assert legacy_comp.psi_fixed_mvs == 45.0
+    assert legacy_comp.psi_empirical_mvs == 60.0
+    assert legacy_comp.calibrated_psi_fixed == 65.0
+    assert legacy_comp.calibrated_psi_empirical == 65.0
+
+

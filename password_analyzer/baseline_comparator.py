@@ -67,6 +67,37 @@ class BaselineComparison:
     calibrated_psi_empirical: float = 0.0
     calibrated_classification_empirical: str = ""
 
+    def __post_init__(self):
+        # Synchronize explicit field names with baseline attributes if not set
+        if not self.psi_fixed_mvs and self.psi:
+            self.psi_fixed_mvs = self.psi
+        if not self.psi_empirical_mvs and self.empirical_psi:
+            self.psi_empirical_mvs = self.empirical_psi
+        if not self.calibrated_psi_fixed and self.calibrated_psi:
+            self.calibrated_psi_fixed = self.calibrated_psi
+        if not self.calibrated_psi_empirical and self.calibrated_psi:
+            self.calibrated_psi_empirical = self.calibrated_psi
+        if not self.calibrated_classification_fixed and self.our_classification:
+            self.calibrated_classification_fixed = self.our_classification
+        if not self.calibrated_classification_empirical and self.our_classification:
+            self.calibrated_classification_empirical = self.our_classification
+
+    def __getattr__(self, name: str) -> Any:
+        # Fallback aliases to protect against attribute errors in any deployment environment
+        if name == "psi_fixed_mvs":
+            return getattr(self, "psi", 0.0)
+        elif name == "psi_empirical_mvs":
+            return getattr(self, "empirical_psi", 0.0)
+        elif name == "calibrated_psi_fixed":
+            return getattr(self, "calibrated_psi", 0.0)
+        elif name == "calibrated_psi_empirical":
+            return getattr(self, "calibrated_psi", 0.0)
+        elif name == "calibrated_classification_fixed":
+            return getattr(self, "our_classification", "")
+        elif name == "calibrated_classification_empirical":
+            return getattr(self, "our_classification", "")
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
