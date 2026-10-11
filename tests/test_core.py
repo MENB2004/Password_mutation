@@ -1243,7 +1243,7 @@ def test_privacy_preserving_pipeline_no_password_retention():
 
 
 def test_baseline_comparison_psi_variants_availability():
-    """Verify BaselineComparison exposes both psi_fixed_mvs and psi_empirical_mvs."""
+    """Verify BaselineComparison exposes explicit fields for all PSI and classification variants."""
     from password_analyzer.baseline_comparator import compare_password, BaselineComparison
 
     comp = compare_password("Password123!")
@@ -1260,9 +1260,11 @@ def test_baseline_comparison_psi_variants_availability():
     assert comp.psi_empirical_mvs == 66.0
     assert comp.calibrated_psi_fixed == 20.0
     assert comp.calibrated_psi_empirical == 67.1
+    assert comp.calibrated_classification_fixed == "Predictable Mutation (Vulnerable Family)"
+    assert comp.calibrated_classification_empirical == "Predictable Mutation (Vulnerable Family)"
 
-    # Verify fallback resolution on legacy-constructed instances
-    legacy_comp = BaselineComparison(
+    # Verify that explicit BaselineComparison construction preserves all variants distinctly
+    constructed_comp = BaselineComparison(
         password="TestPassword1!",
         length=14,
         character_pool=94,
@@ -1273,7 +1275,7 @@ def test_baseline_comparison_psi_variants_availability():
         psi=45.0,
         empirical_psi=60.0,
         calibrated_psi=65.0,
-        our_classification="Vulnerable",
+        our_classification="Predictable Mutation (Vulnerable Family)",
         existing_estimator_name="zxcvbn",
         existing_estimator_score=2,
         existing_estimator_normalized=50.0,
@@ -1282,12 +1284,90 @@ def test_baseline_comparison_psi_variants_availability():
         existing_estimator_category="Fair",
         existing_estimator_warning=None,
         existing_estimator_suggestions=[],
-        explanation="Legacy test",
+        explanation="Explicit test",
+        psi_fixed_mvs=45.0,
+        psi_empirical_mvs=60.0,
+        calibrated_psi_fixed=65.0,
+        calibrated_classification_fixed="Predictable Mutation (Vulnerable Family)",
+        calibrated_psi_empirical=72.0,
+        calibrated_classification_empirical="Low Vulnerability (Synthetic Random-like Control)",
     )
-    # Even if constructed without explicit PSI fields, post_init and __getattr__ must resolve them:
-    assert legacy_comp.psi_fixed_mvs == 45.0
-    assert legacy_comp.psi_empirical_mvs == 60.0
-    assert legacy_comp.calibrated_psi_fixed == 65.0
-    assert legacy_comp.calibrated_psi_empirical == 65.0
+    assert constructed_comp.psi_fixed_mvs == 45.0
+    assert constructed_comp.psi_empirical_mvs == 60.0
+    assert constructed_comp.calibrated_psi_fixed == 65.0
+    assert constructed_comp.calibrated_classification_fixed == "Predictable Mutation (Vulnerable Family)"
+    assert constructed_comp.calibrated_psi_empirical == 72.0
+    assert constructed_comp.calibrated_classification_empirical == "Low Vulnerability (Synthetic Random-like Control)"
+    # Disallow invalid attributes with clean AttributeError (no fallback masking)
+    with pytest.raises(AttributeError):
+        _ = constructed_comp.non_existent_attribute
+
+
+def test_ui_schema_consistency_all_attributes_exist():
+    """Verify that every comp.* attribute accessed in app.py exists explicitly on BaselineComparison."""
+    from password_analyzer.baseline_comparator import compare_password
+    comp = compare_password("Password123!")
+
+    # Tab 1 High-level metrics
+    assert isinstance(comp.entropy, float)
+    assert isinstance(comp.mvs, float)
+    assert isinstance(comp.psi_fixed_mvs, float)
+    assert isinstance(comp.existing_estimator_score, int)
+    assert isinstance(comp.existing_estimator_name, str)
+    assert isinstance(comp.existing_estimator_category, str)
+    assert isinstance(comp.psi_empirical_mvs, float)
+
+    # Section 1 & 2
+    assert isinstance(comp.length, int)
+    assert isinstance(comp.character_pool, int)
+    assert isinstance(comp.empirical_mvs, float)
+
+    # Section 3 Security Index
+    assert isinstance(comp.calibrated_psi_fixed, float)
+    assert isinstance(comp.calibrated_classification_fixed, str)
+    assert isinstance(comp.calibrated_psi_empirical, float)
+    assert isinstance(comp.calibrated_classification_empirical, str)
+
+    # Section 4 Baseline comparison
+    assert isinstance(comp.conventional_score, float)
+    assert isinstance(comp.existing_estimator_crack_time_display, str)
+    assert isinstance(comp.existing_estimator_guesses_log10, float)
+
+    # Section 5 Explanation
+    assert isinstance(comp.explanation, str)
+    assert len(comp.explanation) > 0
+
+
+def test_threshold_boundary_decision_exact():
+    """Verify threshold boundary: equality tau=69.0 is non-vulnerable, strictly <69.0 is vulnerable."""
+    from password_analyzer.core import evaluate_calibrated_psi
+
+    # At exact threshold (69.0) -> Non-vulnerable
+    # E.g. H_bits=50, MVS=31.0 => PSI = 100 * 1.0 * (1 - 0.31) = 69.0
+    psi_exact, class_exact = evaluate_calibrated_psi(50.0, 31.0, h_ref=50.0, threshold=69.0)
+    assert math.isclose(psi_exact, 69.0, abs_tol=1e-5)
+    assert class_exact == "Low Vulnerability (Synthetic Random-like Control)"
+
+    # Just below threshold (68.99) -> Vulnerable
+    psi_below, class_below = evaluate_calibrated_psi(50.0, 31.01, h_ref=50.0, threshold=69.0)
+    assert psi_below < 69.0
+    assert class_below == "Predictable Mutation (Vulnerable Family)"
+
+
+def test_calibrated_fixed_and_empirical_distinctness():
+    """Verify that fixed and empirical calibrated PSI and classifications are computed independently."""
+    from password_analyzer.baseline_comparator import compare_password
+
+    # For Password123!:
+    # Fixed MVS = 80.0 (w_dict=0.35 + w_cap=0.15 + w_num=0.20 + w_sym=0.10)
+    # Empirical MVS = 32.89 (weighted by Laplace frequencies)
+    comp = compare_password("Password123!")
+    assert comp.calibrated_psi_fixed != comp.calibrated_psi_empirical
+    assert comp.calibrated_psi_fixed == 20.0
+    assert comp.calibrated_psi_empirical == 67.1
+    # Both happen to be < 69.0 for Password123!
+    assert comp.calibrated_classification_fixed == "Predictable Mutation (Vulnerable Family)"
+    assert comp.calibrated_classification_empirical == "Predictable Mutation (Vulnerable Family)"
+
 
 

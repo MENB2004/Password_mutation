@@ -59,44 +59,12 @@ class BaselineComparison:
     existing_estimator_warning: Optional[str]
     existing_estimator_suggestions: List[str]
     explanation: str
-    # Explicitly named fields:
-    psi_fixed_mvs: float = 0.0
-    psi_empirical_mvs: float = 0.0
-    calibrated_psi_fixed: float = 0.0
-    calibrated_classification_fixed: str = ""
-    calibrated_psi_empirical: float = 0.0
-    calibrated_classification_empirical: str = ""
-
-    def __post_init__(self):
-        # Synchronize explicit field names with baseline attributes if not set
-        if not self.psi_fixed_mvs and self.psi:
-            self.psi_fixed_mvs = self.psi
-        if not self.psi_empirical_mvs and self.empirical_psi:
-            self.psi_empirical_mvs = self.empirical_psi
-        if not self.calibrated_psi_fixed and self.calibrated_psi:
-            self.calibrated_psi_fixed = self.calibrated_psi
-        if not self.calibrated_psi_empirical and self.calibrated_psi:
-            self.calibrated_psi_empirical = self.calibrated_psi
-        if not self.calibrated_classification_fixed and self.our_classification:
-            self.calibrated_classification_fixed = self.our_classification
-        if not self.calibrated_classification_empirical and self.our_classification:
-            self.calibrated_classification_empirical = self.our_classification
-
-    def __getattr__(self, name: str) -> Any:
-        # Fallback aliases to protect against attribute errors in any deployment environment
-        if name == "psi_fixed_mvs":
-            return getattr(self, "psi", 0.0)
-        elif name == "psi_empirical_mvs":
-            return getattr(self, "empirical_psi", 0.0)
-        elif name == "calibrated_psi_fixed":
-            return getattr(self, "calibrated_psi", 0.0)
-        elif name == "calibrated_psi_empirical":
-            return getattr(self, "calibrated_psi", 0.0)
-        elif name == "calibrated_classification_fixed":
-            return getattr(self, "our_classification", "")
-        elif name == "calibrated_classification_empirical":
-            return getattr(self, "our_classification", "")
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+    psi_fixed_mvs: float
+    psi_empirical_mvs: float
+    calibrated_psi_fixed: float
+    calibrated_classification_fixed: str
+    calibrated_psi_empirical: float
+    calibrated_classification_empirical: str
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -291,9 +259,11 @@ def build_comparison_dataframe(comparisons: List[BaselineComparison]) -> pd.Data
             "PSI (Fixed MVS)": c.psi_fixed_mvs,
             "PSI (Empirical MVS)": c.psi_empirical_mvs,
             "Calibrated PSI (Fixed MVS, H_ref=50)": c.calibrated_psi_fixed,
+            "Classification (Fixed MVS)": c.calibrated_classification_fixed,
             "Calibrated PSI (Empirical MVS, H_ref=50)": c.calibrated_psi_empirical,
+            "Classification (Empirical MVS)": c.calibrated_classification_empirical,
             "Existing Estimator (Score)": f"{c.existing_estimator_score}/4 ({c.existing_estimator_category})",
             "Existing Estimator Crack Time": c.existing_estimator_crack_time_display,
-            "Proposed Classification": c.our_classification,
+            "Proposed Classification": c.calibrated_classification_fixed,
         })
     return pd.DataFrame(rows)
