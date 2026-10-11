@@ -23,6 +23,7 @@ from password_analyzer.dataset_pipeline import (
     import_research_dataset,
     create_example_public_research_dataset,
 )
+from password_analyzer.wordlist import get_current_wordlist_info
 
 # ==============================================================================
 # FEATURE FLAGS & CONFIGURATION
@@ -30,7 +31,7 @@ from password_analyzer.dataset_pipeline import (
 # Controls visibility of the Model Configuration sidebar section (weights, profiles, H_ref).
 # False: Clean, streamlined analysis interface using default academic parameters.
 # True:  Interactive controls for modifying weights presets, custom sliders, and H_ref.
-SHOW_MODEL_CONFIGURATION = True
+SHOW_MODEL_CONFIGURATION = False
 
 st.set_page_config(
     page_title="Password Mutation & Empirical Security Analyzer",
@@ -90,6 +91,10 @@ if SHOW_MODEL_CONFIGURATION:
         st.sidebar.info(f"H_ref locked to calibrated value: {CALIBRATED_H_REF:.0f} bits")
     else:
         h_ref = st.sidebar.slider("Reference entropy H_ref (bits)", 40, 160, 80, step=5)
+
+    # Dictionary provider status (only displayed when model configuration is enabled)
+    st.sidebar.subheader("Dictionary Provider")
+    st.sidebar.caption(f"Active provider: {get_current_wordlist_info().label}")
 else:
     # Default model configuration when the configuration UI is disabled
     weights = DEFAULT_WEIGHTS.copy()
@@ -174,6 +179,7 @@ with main_tabs[0]:
             # 2. PREDICTABLE MUTATION ANALYSIS
             with col_right:
                 st.subheader("2. PREDICTABLE MUTATION ANALYSIS")
+                st.write(f"• **Dictionary source:** {get_current_wordlist_info().label}")
                 st.write(f"• **Dictionary base:** `{analysis.dictionary_base or 'None detected'}`")
                 st.write(f"• **Capitalization:** `{'Detected' if 'capitalization' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('capitalization', 0.0):.2f})")
                 st.write(f"• **Substitution:** `{'Detected' if 'character substitution' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('substitution', 0.0):.2f})")

@@ -23,7 +23,15 @@ SCIENTIFIC & ETHICAL NOTICE:
 import math
 import re
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Tuple, Any
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any, Iterable, Union
+
+from .wordlist import (
+    load_wordlist_entries,
+    get_active_wordlist,
+    get_current_wordlist_info,
+    WordlistInfo,
+)
 
 # Curated reference dictionary of common root words, names, concepts, and seasons.
 # Educational reference corpus; for research version, can be extended with licensed lists.
@@ -206,6 +214,7 @@ class PasswordAnalysis:
     calibrated_classification_fixed: str
     calibrated_psi_empirical: float
     calibrated_classification_empirical: str
+    wordlist_source: str = ""
 
 
 def character_set_size(password: str) -> int:
@@ -318,26 +327,36 @@ def detect_keyboard_pattern(password: str) -> bool:
     return any(w in lower for w in walks)
 
 
-def _match_dictionary_word(target_text: str) -> Optional[str]:
-    """Helper to match a word from COMMON_WORDS in target text safely.
+def _match_dictionary_word(target_text: str,
+                           candidate_words: Optional[Iterable[str]] = None) -> Optional[str]:
+    """Helper to match a word from candidate_words or active wordlist in target text safely.
 
-    Words of length >= 4 match via substring inclusion.
+    Words of length >= 4 match via substring inclusion (longest match first).
     Words of length < 4 (e.g. 'cat', 'dog', 'may') match if exact match,
     at string start/end, or bounded by non-letters, preventing false positives
     inside arbitrary random character strings.
     """
-    for word in sorted(COMMON_WORDS, key=len, reverse=True):
+    if candidate_words is None:
+        _, sorted_words = get_active_wordlist()
+    elif isinstance(candidate_words, tuple):
+        sorted_words = candidate_words
+    else:
+        sorted_words = tuple(sorted(candidate_words, key=lambda w: (len(w), w), reverse=True))
+
+    for word in sorted_words:
         if len(word) >= 4 and word in target_text:
             return word
         elif len(word) < 4:
-            if target_text == word or target_text.startswith(word) or target_text.endswith(word):
+            if target_text == word:
                 return word
             if re.search(r"(^|[^a-zA-Z])" + re.escape(word) + r"([^a-zA-Z]|$)", target_text):
                 return word
     return None
 
 
-def find_dictionary_base(password: str) -> Optional[str]:
+def find_dictionary_base(password: str,
+                         wordlist: Optional[Iterable[str]] = None,
+                         wordlist_path: Optional[Union[str, Path]] = None) -> Optional[str]:
     """Identify a dictionary root word in the password, if present.
 
     Inspects the lowercase representation first, then reverses common leetspeak substitutions.
@@ -348,18 +367,25 @@ def find_dictionary_base(password: str) -> Optional[str]:
     if not password or not password.strip():
         return None
 
-    lower = password.lower()
+    if wordlist is not None:
+        candidate_words = wordlist
+    elif wordlist_path is not None:
+        _, candidate_words, _ = load_wordlist_entries(wordlist_path)
+    else:
+        candidate_words = None
 
-    # Direct match or embedded dictionary word
-    direct_match = _match_dictionary_word(lower)
+    lower = password.lower()
+    normalized = normalize_substitutions(password)
+
+    direct_match = _match_dictionary_word(lower, candidate_words)
+    normalized_match = _match_dictionary_word(normalized, candidate_words)
+
+    # Prioritize longer root: if normalized match is strictly longer than direct match,
+    # the password represents substitutions applied to that longer base (e.g. 'p@ssword' -> 'password' (8) over 'sword' (5)).
+    if normalized_match and (not direct_match or len(normalized_match) > len(direct_match)):
+        return normalized_match
     if direct_match:
         return direct_match
-
-    # Reversing common leetspeak substitutions
-    normalized = normalize_substitutions(password)
-    normalized_match = _match_dictionary_word(normalized)
-    if normalized_match:
-        return normalized_match
 
     return None
 
@@ -609,7 +635,9 @@ def risk_category(psi: float, length: int = 12, has_trivial_pattern: bool = Fals
 def analyze_password(password: str,
                      weights: Optional[Dict[str, float]] = None,
                      h_ref: float = 80.0,
-                     probabilities: Optional[Dict[str, float]] = None) -> PasswordAnalysis:
+                     probabilities: Optional[Dict[str, float]] = None,
+                     wordlist: Optional[Iterable[str]] = None,
+                     wordlist_path: Optional[Union[str, Path]] = None) -> PasswordAnalysis:
     """Comprehensive password analysis producing theoretical, mutation, and calibrated scores.
 
     Parameters:
@@ -617,6 +645,8 @@ def analyze_password(password: str,
       weights: Optional custom dictionary of feature weights.
       h_ref: Reference entropy parameter (default 80.0 bits).
       probabilities: Optional empirical probability dictionary.
+      wordlist: Optional explicit in-memory wordlist iterable.
+      wordlist_path: Optional path to an external plain-text wordlist file.
     """
     if not isinstance(password, str):
         raise TypeError(f"password must be a string, got {type(password).__name__}")
@@ -624,6 +654,16 @@ def analyze_password(password: str,
         raise ValueError(f"h_ref must be a positive finite number, got {h_ref}.")
     if weights is not None and len(weights) == 0:
         raise ValueError("Weights dictionary cannot be empty.")
+
+    if wordlist is not None:
+        wl_info = WordlistInfo(
+            source_type="custom_memory",
+            count=len(set(wordlist)),
+            label=f"Custom wordlist ({len(set(wordlist)):,} roots)",
+            is_expanded=True,
+        )
+    else:
+        wl_info = get_current_wordlist_info(wordlist_path)
 
     L = len(password)
     # Handle empty and whitespace-only inputs safely
@@ -658,6 +698,7 @@ def analyze_password(password: str,
             calibrated_classification_fixed=cal_class_f,
             calibrated_psi_empirical=0.0,
             calibrated_classification_empirical=cal_class_e,
+            wordlist_source=wl_info.label,
         )
 
     n = character_set_size(password)
@@ -672,7 +713,7 @@ def analyze_password(password: str,
         "symbols": any(not c.isalnum() for c in password),
     }
 
-    base = find_dictionary_base(password)
+    base = find_dictionary_base(password, wordlist=wordlist, wordlist_path=wordlist_path)
     components = mutation_components(password, base)
     mutations = detect_mutations(password, base)
     mvs_fixed = calculate_mvs(components, weights)
@@ -720,6 +761,7 @@ def analyze_password(password: str,
         calibrated_classification_fixed=cal_class_fixed,
         calibrated_psi_empirical=cal_psi_emp,
         calibrated_classification_empirical=cal_class_emp,
+        wordlist_source=wl_info.label,
     )
 
 
@@ -736,6 +778,7 @@ def format_analysis(result: PasswordAnalysis) -> str:
         f"Character-set size: {data['character_set_size']}",
         f"Search space: {search_space_str}",
         f"Theoretical Entropy: {data['entropy_bits']:.2f} bits",
+        f"Dictionary source: {data.get('wordlist_source') or 'Default'}",
         f"Dictionary base: {data['dictionary_base'] or 'Not detected'}",
         f"Mutations: {', '.join(data['mutations']) or 'None detected'}",
         "",

@@ -34,6 +34,13 @@ from .experiment_runner import (
     run_baseline_comparison_experiment,
     run_family_disjoint_evaluation,
 )
+from .wordlist import (
+    WordlistInfo,
+    load_wordlist_entries,
+    get_current_wordlist_info,
+    get_active_wordlist,
+    clear_wordlist_cache,
+)
 
 __all__ = [
     "analyze_password",
@@ -64,4 +71,9 @@ __all__ = [
     "create_example_public_research_dataset",
     "run_baseline_comparison_experiment",
     "run_family_disjoint_evaluation",
+    "WordlistInfo",
+    "load_wordlist_entries",
+    "get_current_wordlist_info",
+    "get_active_wordlist",
+    "clear_wordlist_cache",
 ]

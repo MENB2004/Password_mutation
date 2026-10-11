@@ -65,6 +65,7 @@ class BaselineComparison:
     calibrated_classification_fixed: str
     calibrated_psi_empirical: float
     calibrated_classification_empirical: str
+    wordlist_source: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -186,11 +187,13 @@ def generate_explanation(analysis, est_res: Dict[str, Any]) -> str:
 
 def compare_password(password: str,
                      weights: Optional[Dict[str, float]] = None,
-                     h_ref: float = 80.0) -> BaselineComparison:
+                     h_ref: float = 80.0,
+                     wordlist: Optional[Any] = None,
+                     wordlist_path: Optional[Any] = None) -> BaselineComparison:
     """Compare a single password across Conventional Entropy, Existing Estimator (zxcvbn),
     Proposed MVS, and Proposed PSI.
     """
-    analysis = analyze_password(password, weights=weights, h_ref=h_ref)
+    analysis = analyze_password(password, weights=weights, h_ref=h_ref, wordlist=wordlist, wordlist_path=wordlist_path)
     est_res = get_existing_estimator_assessment(password)
 
     # Conventional length/diversity score (0-100)
@@ -232,18 +235,21 @@ def compare_password(password: str,
         calibrated_classification_fixed=analysis.calibrated_classification_fixed,
         calibrated_psi_empirical=round(analysis.calibrated_psi_empirical, 1),
         calibrated_classification_empirical=analysis.calibrated_classification_empirical,
+        wordlist_source=analysis.wordlist_source,
     )
 
 
 def compare_benchmark_passwords(weights: Optional[Dict[str, float]] = None,
-                                h_ref: float = 80.0) -> List[BaselineComparison]:
+                                h_ref: float = 80.0,
+                                wordlist: Optional[Any] = None,
+                                wordlist_path: Optional[Any] = None) -> List[BaselineComparison]:
     """Compare the three canonical benchmark passwords:
     1. 'Password123!' (Predictable suffix mutation)
     2. 'vQ7mK2xR9zP4' (Random-like control)
     3. 'P@ssword2026!' (Complex combination mutation)
     """
     benchmarks = ["Password123!", "vQ7mK2xR9zP4", "P@ssword2026!"]
-    return [compare_password(pw, weights=weights, h_ref=h_ref) for pw in benchmarks]
+    return [compare_password(pw, weights=weights, h_ref=h_ref, wordlist=wordlist, wordlist_path=wordlist_path) for pw in benchmarks]
 
 
 def build_comparison_dataframe(comparisons: List[BaselineComparison]) -> pd.DataFrame:
