@@ -40,6 +40,16 @@ def main():
         action="store_true",
         help="Generate an example public/research dataset file at data/public_research_dataset_example.csv",
     )
+    parser.add_argument(
+        "--eval-family-disjoint",
+        action="store_true",
+        help="Run Phase 5 held-out evaluation on family-disjoint calibration and evaluation splits",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run both baseline comparison and family-disjoint held-out evaluation experiments",
+    )
 
     args = parser.parse_args()
 
@@ -58,6 +68,23 @@ def main():
         print(report.summary_table().to_string(index=False))
         return
 
+    if args.eval_family_disjoint and not args.all:
+        print("\n[*] Running Phase 5 Family-Disjoint Evaluation Protocol...")
+        from password_analyzer.experiment_runner import run_family_disjoint_evaluation
+        df_eval, cal_stats, eval_stats = run_family_disjoint_evaluation(output_dir=args.outdir)
+        print(f"\n[+] Evaluated {len(df_eval)} held-out passwords across 6 models.")
+        print("\n--- Family-Disjoint Evaluation Set Performance ---")
+        headers = ["Method", "Accuracy", "Precision", "Recall", "F1", "ROC-AUC", "PR-AUC"]
+        print(f"{headers[0]:<30} {headers[1]:<10} {headers[2]:<10} {headers[3]:<10} {headers[4]:<10} {headers[5]:<10} {headers[6]:<10}")
+        print("-" * 90)
+        for method, m in eval_stats.items():
+            print(
+                f"{method:<30} {m['Accuracy']:<10.4f} {m['Precision']:<10.4f} {m['Recall']:<10.4f} "
+                f"{m['F1-Score']:<10.4f} {m['ROC-AUC']:<10.4f} {m['Average Precision']:<10.4f}"
+            )
+        print(f"\nReport written to: {args.outdir}/PHASE_5_REPORT.md")
+        return
+
     print(f"\n[*] Running baseline comparison experiment using dataset: {args.dataset}")
     print(f"[*] Artifacts will be saved to: {args.outdir}/")
 
@@ -66,14 +93,14 @@ def main():
         output_dir=args.outdir,
     )
 
-    print(f"\n[+] Successfully evaluated {len(df_comp)} passwords across all 5 models.")
+    print(f"\n[+] Successfully evaluated {len(df_comp)} passwords across all models.")
     print("\n--- Model Benchmark Performance Summary ---")
     headers = ["Method", "Accuracy", "Precision", "Recall", "F1", "ROC-AUC", "PR-AUC"]
-    print(f"{headers[0]:<25} {headers[1]:<10} {headers[2]:<10} {headers[3]:<10} {headers[4]:<10} {headers[5]:<10} {headers[6]:<10}")
-    print("-" * 85)
+    print(f"{headers[0]:<30} {headers[1]:<10} {headers[2]:<10} {headers[3]:<10} {headers[4]:<10} {headers[5]:<10} {headers[6]:<10}")
+    print("-" * 90)
     for method, m in stats.items():
         print(
-            f"{method:<25} {m['Accuracy']:<10.4f} {m['Precision']:<10.4f} {m['Recall']:<10.4f} "
+            f"{method:<30} {m['Accuracy']:<10.4f} {m['Precision']:<10.4f} {m['Recall']:<10.4f} "
             f"{m['F1-Score']:<10.4f} {m['ROC-AUC']:<10.4f} {m['Average Precision']:<10.4f}"
         )
 
@@ -81,6 +108,23 @@ def main():
     print(f" - CSV Results: {args.outdir}/baseline_comparison.csv")
     print(f" - Formal Report: {args.outdir}/BASELINE_COMPARISON_REPORT.md")
     print(f" - Graphs: {args.outdir}/baseline_*.png (8 publication figures)")
+
+    if args.all:
+        print("\n" + "=" * 80)
+        print("[*] Running Phase 5 Family-Disjoint Evaluation Protocol (--all)...")
+        from password_analyzer.experiment_runner import run_family_disjoint_evaluation
+        df_eval, cal_stats, eval_stats = run_family_disjoint_evaluation(output_dir=args.outdir)
+        print(f"\n[+] Evaluated {len(df_eval)} held-out passwords across 6 models.")
+        print("\n--- Family-Disjoint Evaluation Set Performance ---")
+        print(f"{headers[0]:<30} {headers[1]:<10} {headers[2]:<10} {headers[3]:<10} {headers[4]:<10} {headers[5]:<10} {headers[6]:<10}")
+        print("-" * 90)
+        for method, m in eval_stats.items():
+            print(
+                f"{method:<30} {m['Accuracy']:<10.4f} {m['Precision']:<10.4f} {m['Recall']:<10.4f} "
+                f"{m['F1-Score']:<10.4f} {m['ROC-AUC']:<10.4f} {m['Average Precision']:<10.4f}"
+            )
+        print(f"\nReport written to: {args.outdir}/PHASE_5_REPORT.md")
+
     print("\nExperiment run completed successfully.")
 
 

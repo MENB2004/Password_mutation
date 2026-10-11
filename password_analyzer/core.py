@@ -2,19 +2,22 @@
 
 Formulations:
   - Theoretical search space: S = N^L
-  - Shannon entropy: H = L * log2(N)
+  - Theoretical character-pool Shannon entropy: H = L * log2(N)
+    (Assumes independent, uniformly selected characters from alphabet pool N;
+     idealized brute-force search space metric, NOT human password entropy)
   - Normalized entropy: E_norm = min(H / H_ref, 1.0)
-  - Mutation Vulnerability Score: MVS = 100 * sum(w_i * x_i)
+  - Mutation Vulnerability Score (Fixed-weights): MVS_fixed = 100 * sum(w_i * x_i)
   - Laplace-smoothed empirical frequency: p_hat = (k + 1) / (n + 2)
   - Information surprisal (bits): I = -log2(p_hat)
   - Empirical MVS: MVS_emp = 100 * [sum(w_i * p_hat_i * x_i)] / [sum(w_i * x_i)]
-  - Password Security Index: PSI = 100 * E_norm * (1 - MVS / 100)
-  - Held-out Decision Rule: Vulnerable if Calibrated PSI < 69.0 (at H_ref = 50.0)
+  - Password Security Index (Fixed MVS): PSI_fixed = 100 * E_norm * (1 - MVS_fixed / 100)
+  - Password Security Index (Empirical MVS): PSI_emp = 100 * E_norm * (1 - MVS_emp / 100)
+  - Calibrated Decision Rule: Vulnerable if PSI < 69.0 (at H_ref = 50.0)
 
-IMPORTANT SCIENTIFIC DISCLAIMER:
+SCIENTIFIC & ETHICAL NOTICE:
   Theoretical Shannon entropy assumes uniform independent random character selection.
-  It reflects the maximum theoretical search space under brute-force assumptions, NOT
-  actual resistance against targeted dictionary or rule-based cracking attacks.
+  It measures the idealized brute-force search space, NOT actual resistance against
+  targeted dictionary, rule-based, or Markov model cracking attacks (e.g. Hashcat, John).
 """
 
 import math
@@ -109,13 +112,21 @@ def surprisal(p: float) -> float:
 
 
 # Empirical probabilities from Phase 3 dataset (n_dictionary=105, n_total=330)
-# Derived via Laplace smoothing p_hat = (k + 1) / (n + 2)
+# Derived via Laplace smoothing p_hat = (k + 1) / (n + 2):
+# - Marginal probability of dictionary root: P(D) = (105 + 1) / (330 + 2) = 106 / 332
+# - Conditional probability of mutation given dictionary root: P(M_i | D) = (k_i + 1) / (105 + 2)
+# Event definitions:
+#   capitalization:  TitleCase / mixed-case applied to base word (k=45 among n_dict=105)
+#   substitution:    leetspeak substitution applied to base word (k=45 among n_dict=105)
+#   numeric_suffix:  digits appended after base word (k=30 among n_dict=105)
+#   symbol_suffix:   punctuation symbols appended after base word (k=30 among n_dict=105)
+#   dictionary_base: presence of recognizable dictionary root (k=105 among n_total=330)
 DEFAULT_EMPIRICAL_PROBABILITIES: Dict[str, float] = {
-    "capitalization": empirical_probability(45, 105),    # 46 / 107 ~ 0.42990654
-    "substitution": empirical_probability(45, 105),      # 46 / 107 ~ 0.42990654
-    "numeric_suffix": empirical_probability(30, 105),    # 31 / 107 ~ 0.28971963
-    "symbol_suffix": empirical_probability(30, 105),     # 31 / 107 ~ 0.28971963
-    "dictionary_base": empirical_probability(105, 330),  # 106 / 332 ~ 0.31927711
+    "capitalization": empirical_probability(45, 105),    # 46 / 107 ~ 0.42990654 (conditional on dictionary base)
+    "substitution": empirical_probability(45, 105),      # 46 / 107 ~ 0.42990654 (conditional on dictionary base)
+    "numeric_suffix": empirical_probability(30, 105),    # 31 / 107 ~ 0.28971963 (conditional on dictionary base)
+    "symbol_suffix": empirical_probability(30, 105),     # 31 / 107 ~ 0.28971963 (conditional on dictionary base)
+    "dictionary_base": empirical_probability(105, 330),  # 106 / 332 ~ 0.31927711 (marginal over corpus)
 }
 
 # Information content / Surprisal in bits: I = -log2(p_hat)
@@ -188,23 +199,32 @@ class PasswordAnalysis:
     empirical_psi: float
     calibrated_psi: float
     calibrated_classification: str
+    # Explicitly named model variants to avoid ambiguity between fixed and empirical MVS:
+    psi_fixed_mvs: float = 0.0
+    psi_empirical_mvs: float = 0.0
+    calibrated_psi_fixed: float = 0.0
+    calibrated_classification_fixed: str = ""
+    calibrated_psi_empirical: float = 0.0
+    calibrated_classification_empirical: str = ""
 
 
 def character_set_size(password: str) -> int:
-    """Return the size of the character pool implied by the password.
+    """Return the theoretical character-pool size implied by the password.
 
-    Character class pool assumptions:
+    Assumes standard character pool cardinalities under uniform selection:
       - Lowercase letters ('a'-'z'): +26
       - Uppercase letters ('A'-'Z'): +26
       - Digits ('0'-'9'):            +10
       - Printable symbols:           +32 (standard ASCII symbol pool)
 
     Unicode characters:
-      - Characters matching islower() add 26 if not already added.
-      - Characters matching isupper() add 26 if not already added.
-      - Other non-alphanumeric unicode characters add 32 to symbols.
+      - Non-ASCII lowercase add 26 if not already included.
+      - Non-ASCII uppercase add 26 if not already included.
+      - Non-alphanumeric unicode characters add 32 to symbols.
+
+    Empty and whitespace-only inputs return 0 (no viable character pool).
     """
-    if not password:
+    if not password or not password.strip():
         return 0
     size = 0
     if any(c.islower() for c in password):
@@ -219,13 +239,16 @@ def character_set_size(password: str) -> int:
 
 
 def entropy(password: str) -> float:
-    """Calculate theoretical Shannon entropy in bits under uniform independent selection.
+    """Calculate theoretical character-pool Shannon entropy in bits.
 
     H = L * log2(N)
-    Returns 0.0 if the password is empty or character pool is 0.
+    Assumes independent, uniformly selected characters from pool size N.
+    Returns 0.0 if the password is empty, whitespace-only, or character pool is 0.
     """
+    if not password or not password.strip():
+        return 0.0
     n = character_set_size(password)
-    if not password or n <= 0:
+    if n <= 0:
         return 0.0
     return len(password) * math.log2(n)
 
@@ -239,8 +262,9 @@ def detect_repetitive_pattern(password: str) -> bool:
     """Detect if password contains excessive character repetition.
 
     E.g. 'aaaa', '111111111111', 'abababab'.
+    Empty and whitespace-only inputs safely return False.
     """
-    if len(password) < 3:
+    if len(password) < 3 or not password.strip():
         return False
     if re.search(r"(.)\1{2,}", password):
         return True
@@ -257,8 +281,9 @@ def detect_sequential_pattern(password: str) -> bool:
     Requires a run of >= 5 consecutive characters, or >= 3 characters constituting
     at least 50% of the password length. This prevents short random adjacencies
     in long complex passwords from triggering false positives.
+    Empty and whitespace-only inputs safely return False.
     """
-    if len(password) < 3:
+    if len(password) < 3 or not password.strip():
         return False
     low = password.lower()
     max_run, cur_run = 0, 0
@@ -276,7 +301,12 @@ def detect_sequential_pattern(password: str) -> bool:
 
 
 def detect_keyboard_pattern(password: str) -> bool:
-    """Detect common keyboard spatial walks (e.g. 'qwerty', 'asdfgh', 'zxcvbn')."""
+    """Detect common keyboard spatial walks (e.g. 'qwerty', 'asdfgh', 'zxcvbn').
+
+    Empty and whitespace-only inputs safely return False.
+    """
+    if len(password) < 3 or not password.strip():
+        return False
     lower = password.lower()
     walks = [
         "qwerty", "wertyu", "ertyui", "rtyuio", "tyuiop",
@@ -311,10 +341,11 @@ def find_dictionary_base(password: str) -> Optional[str]:
     """Identify a dictionary root word in the password, if present.
 
     Inspects the lowercase representation first, then reverses common leetspeak substitutions.
-    If no dictionary root is found, returns None. Random-looking strings and unsupported
-    dictionary entries safely return None without being falsely classified.
+    If no dictionary root is found, returns None. Random-looking strings, pure digit strings,
+    empty/whitespace inputs, and unsupported dictionary entries safely return None without
+    being falsely classified.
     """
-    if not password:
+    if not password or not password.strip():
         return None
 
     lower = password.lower()
@@ -337,17 +368,19 @@ def mutation_components(password: str, dictionary_base: Optional[str]) -> Dict[s
     """Extract quantitative indicators x_i in [0.0, 1.0] for the 5 baseline features.
 
     Features:
-      1. dictionary_base:  1.0 if dictionary base or trivial pattern is detected, else 0.0.
-      2. capitalization:   1.0 if TitleCase / first-letter capital, 0.7 if mixed-case, else 0.0.
+      1. dictionary_base:  1.0 if dictionary base is detected, else 0.0.
+      2. capitalization:   1.0 if TitleCase / first-letter capital, 0.7 if mixed-case on base, else 0.0.
       3. substitution:     1.0 if leetspeak substitution applied to base, else 0.0.
       4. numeric_suffix:   1.0 if digits appended after base before optional symbols, else 0.0.
       5. symbol_suffix:    1.0 if punctuation / symbols appended at end of base, else 0.0.
 
-    CRITICAL MODELING RULE:
-      If NO dictionary base or trivial pattern is present, all mutation indicators are 0.0.
-      Random character diversity (uppercase letters, digits, symbols) is NOT penalized.
+    CRITICAL SCIENTIFIC MODELING RULE:
+      If NO dictionary base is present, all 5 mutation indicators are strictly 0.0.
+      Non-dictionary passwords (such as pure digit runs '12345678', random strings 'vQ7mK2xR9zP4',
+      or repetitive sequences) do NOT have a dictionary root and MUST NOT have their risk
+      silently attributed to dictionary_base.
     """
-    if not password:
+    if not password or not password.strip() or not dictionary_base:
         return {
             "capitalization": 0.0,
             "substitution": 0.0,
@@ -358,18 +391,12 @@ def mutation_components(password: str, dictionary_base: Optional[str]) -> Dict[s
 
     lower = password.lower()
     normalized = normalize_substitutions(password)
+    dictionary_score = 1.0
 
-    has_trivial_pattern = (
-        detect_repetitive_pattern(password) or
-        detect_sequential_pattern(password) or
-        detect_keyboard_pattern(password)
-    )
-
-    dictionary_score = 1.0 if (dictionary_base or has_trivial_pattern) else 0.0
-
-    # 1. Capitalization (assessed relative to recognized base)
+    # 1. Capitalization (assessed relative to recognized dictionary base)
     capitalization_score = 0.0
-    if dictionary_base:
+    # Guard: pure digit passwords or passwords without letters cannot have capitalization
+    if any(c.isalpha() for c in password):
         idx = lower.find(dictionary_base)
         if idx < 0:
             idx = normalized.find(dictionary_base)
@@ -390,7 +417,7 @@ def mutation_components(password: str, dictionary_base: Optional[str]) -> Dict[s
 
     # 2. Character substitution (leetspeak on dictionary base)
     substitution_score = 0.0
-    if dictionary_base and dictionary_base not in lower and dictionary_base in normalized:
+    if dictionary_base not in lower and dictionary_base in normalized:
         substitution_score = 1.0
 
     # 3. Numeric suffix (digits appended after base, before optional trailing symbols)
@@ -398,24 +425,19 @@ def mutation_components(password: str, dictionary_base: Optional[str]) -> Dict[s
     symbol_match = re.search(r"[^a-zA-Z0-9]+$", password)
     without_symbols = password[:symbol_match.start()] if symbol_match else password
 
-    if dictionary_base:
-        low = without_symbols.lower()
-        idx = low.find(dictionary_base)
-        if idx < 0:
-            norm = normalize_substitutions(without_symbols)
-            idx = norm.find(dictionary_base)
-        if idx >= 0:
-            after_base = without_symbols[idx + len(dictionary_base):]
-            if re.search(r"\d+$", after_base):
-                numeric_score = 1.0
-    elif has_trivial_pattern:
-        # For trivial structural patterns (e.g. keyboard walk "qwerty123"), check if digits follow letters
-        if re.search(r"[a-zA-Z]\d+$", without_symbols):
+    low = without_symbols.lower()
+    idx = low.find(dictionary_base)
+    if idx < 0:
+        norm = normalize_substitutions(without_symbols)
+        idx = norm.find(dictionary_base)
+    if idx >= 0:
+        after_base = without_symbols[idx + len(dictionary_base):]
+        if re.search(r"\d+$", after_base):
             numeric_score = 1.0
 
-    # 4. Symbol suffix (trailing punctuation / symbols at end of password)
+    # 4. Symbol suffix (trailing punctuation / symbols at end of password after base)
     symbol_score = 0.0
-    if (dictionary_base or has_trivial_pattern) and symbol_match:
+    if symbol_match:
         symbol_score = 1.0
 
     return {
@@ -437,7 +459,7 @@ def detect_mutations(password: str, dictionary_base: Optional[str]) -> List[str]
       - 'symbol suffix' in mutations <==> mutation_components['symbol_suffix'] > 0
     Plus structural pattern tags if present ('repetitive characters', etc.).
     """
-    if not password:
+    if not password or not password.strip():
         return []
 
     comps = mutation_components(password, dictionary_base)
@@ -452,7 +474,7 @@ def detect_mutations(password: str, dictionary_base: Optional[str]) -> List[str]
     if comps["symbol_suffix"] > 0.0:
         mutations.append("symbol suffix")
 
-    # Structural / repetitive patterns
+    # Structural / repetitive patterns (distinct from dictionary mutations)
     if detect_repetitive_pattern(password):
         mutations.append("repetitive characters")
     if detect_sequential_pattern(password):
@@ -603,8 +625,42 @@ def analyze_password(password: str,
     if weights is not None and len(weights) == 0:
         raise ValueError("Weights dictionary cannot be empty.")
 
-    n = character_set_size(password)
     L = len(password)
+    # Handle empty and whitespace-only inputs safely
+    if not password or not password.strip():
+        empty_comps = {k: 0.0 for k in (weights or DEFAULT_WEIGHTS)}
+        probs = probabilities or DEFAULT_EMPIRICAL_PROBABILITIES
+        surprisal_dict = {key: surprisal(p) for key, p in probs.items()}
+        cal_psi_f, cal_class_f = evaluate_calibrated_psi(0.0, 0.0)
+        cal_psi_e, cal_class_e = evaluate_calibrated_psi(0.0, 0.0)
+        return PasswordAnalysis(
+            password_length=L,
+            character_set_size=0,
+            search_space=0,
+            entropy_bits=0.0,
+            character_types={"lowercase": False, "uppercase": False, "digits": False, "symbols": False},
+            dictionary_base=None,
+            mutations=[],
+            mutation_components=empty_comps,
+            mvs=0.0,
+            entropy_normalized=0.0,
+            psi=0.0,
+            risk_category="High predictability risk",
+            empirical_probabilities=probs,
+            surprisal_bits=surprisal_dict,
+            empirical_mvs=0.0,
+            empirical_psi=0.0,
+            calibrated_psi=0.0,
+            calibrated_classification=cal_class_e,
+            psi_fixed_mvs=0.0,
+            psi_empirical_mvs=0.0,
+            calibrated_psi_fixed=0.0,
+            calibrated_classification_fixed=cal_class_f,
+            calibrated_psi_empirical=0.0,
+            calibrated_classification_empirical=cal_class_e,
+        )
+
+    n = character_set_size(password)
     # Search space S = N^L (capped calculation to prevent huge memory integer conversion)
     search_space = (n ** L) if (n > 0 and L > 0 and L <= 200) else (n ** min(L, 200) if n > 0 and L > 0 else 0)
     h = entropy(password)
@@ -619,9 +675,9 @@ def analyze_password(password: str,
     base = find_dictionary_base(password)
     components = mutation_components(password, base)
     mutations = detect_mutations(password, base)
-    mvs = calculate_mvs(components, weights)
+    mvs_fixed = calculate_mvs(components, weights)
     e_norm = min(h / h_ref, 1.0)
-    psi = calculate_psi(h, mvs, h_ref)
+    psi_fixed = calculate_psi(h, mvs_fixed, h_ref)
 
     has_trivial = (
         detect_repetitive_pattern(password) or
@@ -633,10 +689,11 @@ def analyze_password(password: str,
     probs = probabilities or DEFAULT_EMPIRICAL_PROBABILITIES
     surprisal_dict = {key: surprisal(p) for key, p in probs.items()}
     emp_mvs = calculate_empirical_mvs(components, weights, probs)
-    emp_psi = calculate_psi(h, emp_mvs, h_ref)
+    psi_emp = calculate_psi(h, emp_mvs, h_ref)
 
-    # Phase 5 Calibrated Held-out Evaluation (uses CALIBRATED_H_REF = 50.0)
-    cal_psi, cal_class = evaluate_calibrated_psi(h, emp_mvs)
+    # Phase 5 Calibrated Held-out Evaluation (uses CALIBRATED_H_REF = 50.0, CALIBRATED_PSI_THRESHOLD = 69.0)
+    cal_psi_fixed, cal_class_fixed = evaluate_calibrated_psi(h, mvs_fixed, CALIBRATED_H_REF, CALIBRATED_PSI_THRESHOLD)
+    cal_psi_emp, cal_class_emp = evaluate_calibrated_psi(h, emp_mvs, CALIBRATED_H_REF, CALIBRATED_PSI_THRESHOLD)
 
     return PasswordAnalysis(
         password_length=L,
@@ -647,16 +704,22 @@ def analyze_password(password: str,
         dictionary_base=base,
         mutations=mutations,
         mutation_components=components,
-        mvs=mvs,
+        mvs=mvs_fixed,
         entropy_normalized=e_norm,
-        psi=psi,
-        risk_category=risk_category(psi, L, has_trivial_pattern=has_trivial),
+        psi=psi_fixed,
+        risk_category=risk_category(psi_fixed, L, has_trivial_pattern=has_trivial),
         empirical_probabilities=probs,
         surprisal_bits=surprisal_dict,
         empirical_mvs=emp_mvs,
-        empirical_psi=emp_psi,
-        calibrated_psi=cal_psi,
-        calibrated_classification=cal_class,
+        empirical_psi=psi_emp,
+        calibrated_psi=cal_psi_emp,
+        calibrated_classification=cal_class_emp,
+        psi_fixed_mvs=psi_fixed,
+        psi_empirical_mvs=psi_emp,
+        calibrated_psi_fixed=cal_psi_fixed,
+        calibrated_classification_fixed=cal_class_fixed,
+        calibrated_psi_empirical=cal_psi_emp,
+        calibrated_classification_empirical=cal_class_emp,
     )
 
 
@@ -672,23 +735,24 @@ def format_analysis(result: PasswordAnalysis) -> str:
         f"Length: {data['password_length']}",
         f"Character-set size: {data['character_set_size']}",
         f"Search space: {search_space_str}",
-        f"Entropy: {data['entropy_bits']:.2f} bits",
+        f"Theoretical Entropy: {data['entropy_bits']:.2f} bits",
         f"Dictionary base: {data['dictionary_base'] or 'Not detected'}",
         f"Mutations: {', '.join(data['mutations']) or 'None detected'}",
         "",
         "--- Baseline Fixed-Weights Model (Phase 1-2) ---",
-        f"MVS: {data['mvs']:.2f}/100",
+        f"Fixed MVS: {data['mvs']:.2f}/100",
         f"Normalized entropy: {data['entropy_normalized']:.3f}",
-        f"PSI: {data['psi']:.2f}/100",
+        f"PSI (Fixed MVS): {data['psi']:.2f}/100",
         f"Risk category: {data['risk_category']}",
         "",
         "--- Empirical Probability Model (Phase 3) ---",
         f"Empirical MVS: {data['empirical_mvs']:.2f}/100",
-        f"Empirical PSI: {data['empirical_psi']:.2f}/100",
+        f"PSI (Empirical MVS): {data['empirical_psi']:.2f}/100",
         "",
         "--- Phase 5 Calibrated Held-out Evaluation ---",
-        f"Calibrated PSI (H_ref={CALIBRATED_H_REF:.0f}): {data['calibrated_psi']:.2f}/100",
+        f"Calibrated PSI (Fixed MVS, H_ref={CALIBRATED_H_REF:.0f}): {data['calibrated_psi_fixed']:.2f}/100 [{data['calibrated_classification_fixed']}]",
+        f"Calibrated PSI (Empirical MVS, H_ref={CALIBRATED_H_REF:.0f}): {data['calibrated_psi_empirical']:.2f}/100 [{data['calibrated_classification_empirical']}]",
         f"Decision Threshold: {CALIBRATED_PSI_THRESHOLD:.1f}",
-        f"Classification: {data['calibrated_classification']}",
+        f"Primary Classification: {data['calibrated_classification']}",
     ]
     return "\n".join(lines)

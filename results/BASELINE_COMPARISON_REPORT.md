@@ -23,8 +23,9 @@ We evaluate how effectively each assessment method separates predictable mutatio
 
 | Assessment Method | Accuracy | Precision | Recall | F1-Score | ROC-AUC | Average Precision (PR-AUC) | Confusion Matrix (TN, FP, FN, TP) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Proposed PSI** ($H_{\text{ref}}=50, \tau=69$) | **0.9788** | **1.0000** | **0.9333** | **0.9655** | **1.0000** | **1.0000** | (225, 0, 7, 98) |
-| **Proposed MVS** ($> 0$) | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | (225, 0, 0, 105) |
+| **Proposed PSI (Fixed MVS)** ($H_{\text{ref}}=50, \tau=69$) | **1.0000** | **1.0000** | **1.0000** | **1.0000** | **1.0000** | **1.0000** | (225, 0, 0, 105) |
+| **Proposed PSI (Empirical MVS)** ($H_{\text{ref}}=50, \tau=69$) | 0.9788 | 1.0000 | 0.9333 | 0.9655 | 1.0000 | 1.0000 | (225, 0, 7, 98) |
+| **Proposed Fixed MVS** ($> 0$) | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | (225, 0, 0, 105) |
 | **Proposed Empirical MVS** | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | (225, 0, 0, 105) |
 | **Dropbox zxcvbn** (score $\le 2$) | 0.9242 | 0.8077 | 1.0000 | 0.8936 | 0.9937 | 0.9780 | (200, 25, 0, 105) |
 | **Conventional Entropy** (< Median) | 0.8000 | 0.6211 | 0.9524 | 0.7519 | 0.9365 | 0.8913 | (164, 61, 5, 100) |

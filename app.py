@@ -36,10 +36,10 @@ st.caption(
 )
 
 st.warning(
-    "⚠️ **Security & Demonstration Notice**: "
-    "When running locally (`streamlit run app.py`), processing executes entirely within your local Python runtime. "
-    "When accessed via the public Streamlit Cloud deployment, inputs are processed ephemerally in-memory by the hosted server without persistence or external API calls. "
-    "**Never submit real-world production passwords or sensitive credentials to this public academic demonstration.** Always use synthetic test examples."
+    "⚠️ **Security & Privacy Notice**: "
+    "Inputs are processed ephemerally in volatile memory. Passwords are never persisted to disk, stored in databases, written to diagnostic logs, or transmitted to external services. "
+    "This system is designed as an educational and academic demonstration using synthetic test cases. "
+    "**Never submit real-world production passwords or sensitive credentials.**"
 )
 
 # Sidebar: Configuration
@@ -126,72 +126,80 @@ with main_tabs[0]:
     )
 
     if password_input:
-        comp = compare_password(password_input, weights=weights, h_ref=h_ref)
-        analysis = analyze_password(password_input, weights=weights, h_ref=h_ref)
+        try:
+            comp = compare_password(password_input, weights=weights, h_ref=h_ref)
+            analysis = analyze_password(password_input, weights=weights, h_ref=h_ref)
+        except Exception:
+            st.error("⚠️ An error occurred during password analysis. Please verify the input characters.")
+            comp = None
+            analysis = None
 
-        # High-level Metrics Row
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Entropy (H)", f"{comp.entropy:.2f} bits", help="H = L * log2(N)")
-        m2.metric("Fixed MVS", f"{comp.mvs:.1f}/100", help="Baseline weighted mutation score")
-        m3.metric("Proposed PSI", f"{comp.psi:.1f}/100", help="Normalized entropy discounted by MVS")
-        m4.metric(
-            f"Existing Estimator",
-            f"{comp.existing_estimator_score}/4",
-            help=f"{comp.existing_estimator_name}: {comp.existing_estimator_category}",
-        )
-        m5.metric("Empirical PSI", f"{comp.empirical_psi:.1f}/100", help="PSI using empirical mutation weights")
+        if comp and analysis:
+            # High-level Metrics Row
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Entropy (H)", f"{comp.entropy:.2f} bits", help="Theoretical character-pool entropy: H = L * log2(N)")
+            m2.metric("Fixed MVS", f"{comp.mvs:.1f}/100", help="Baseline weighted mutation score (100 * sum(w_i * x_i))")
+            m3.metric("PSI (Fixed MVS)", f"{comp.psi_fixed_mvs:.1f}/100", help="Normalized entropy discounted by Fixed MVS")
+            m4.metric(
+                f"Existing Estimator",
+                f"{comp.existing_estimator_score}/4",
+                help=f"{comp.existing_estimator_name}: {comp.existing_estimator_category}",
+            )
+            m5.metric("PSI (Empirical MVS)", f"{comp.psi_empirical_mvs:.1f}/100", help="Normalized entropy discounted by Empirical MVS")
 
-        st.markdown("---")
+            st.markdown("---")
 
-        col_left, col_right = st.columns(2)
+            col_left, col_right = st.columns(2)
 
-        # 1. PASSWORD ANALYSIS
-        with col_left:
-            st.subheader("1. PASSWORD ANALYSIS")
-            st.write(f"• **Length ($L$):** `{comp.length}` characters")
-            classes_detected = [k for k, v in analysis.character_types.items() if v]
-            st.write(f"• **Character classes:** {', '.join(f'`{c}`' for c in classes_detected) if classes_detected else '`None`'}")
-            st.write(f"• **Character pool ($N$):** `{comp.character_pool}` possible characters")
-            if analysis.password_length > 200:
-                st.write(f"• **Search space ($S = N^L$):** `> 10^{int(analysis.password_length * math.log10(max(1, analysis.character_set_size)))}` combinations")
-            else:
-                st.write(f"• **Search space ($S = N^L$):** `{analysis.search_space:,}` combinations")
-            st.write(f"• **Theoretical entropy ($H$):** `{comp.entropy:.2f}` bits")
+            # 1. PASSWORD ANALYSIS
+            with col_left:
+                st.subheader("1. PASSWORD ANALYSIS")
+                st.write(f"• **Length ($L$):** `{comp.length}` characters")
+                classes_detected = [k for k, v in analysis.character_types.items() if v]
+                st.write(f"• **Character classes:** {', '.join(f'`{c}`' for c in classes_detected) if classes_detected else '`None`'}")
+                st.write(f"• **Character pool ($N$):** `{comp.character_pool}` possible characters")
+                if analysis.password_length > 200:
+                    st.write(f"• **Search space ($S = N^L$):** `> 10^{int(analysis.password_length * math.log10(max(1, analysis.character_set_size)))}` combinations")
+                else:
+                    st.write(f"• **Search space ($S = N^L$):** `{analysis.search_space:,}` combinations")
+                st.write(f"• **Theoretical entropy ($H$):** `{comp.entropy:.2f}` bits")
 
-        # 2. PREDICTABLE MUTATION ANALYSIS
-        with col_right:
-            st.subheader("2. PREDICTABLE MUTATION ANALYSIS")
-            st.write(f"• **Dictionary base:** `{analysis.dictionary_base or 'None detected'}`")
-            st.write(f"• **Capitalization:** `{'Detected' if 'capitalization' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('capitalization', 0.0):.2f})")
-            st.write(f"• **Substitution:** `{'Detected' if 'character substitution' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('substitution', 0.0):.2f})")
-            st.write(f"• **Numeric suffix:** `{'Detected' if 'numeric suffix' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('numeric_suffix', 0.0):.2f})")
-            st.write(f"• **Symbol suffix:** `{'Detected' if 'symbol suffix' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('symbol_suffix', 0.0):.2f})")
-            extra_patterns = [m for m in analysis.mutations if m not in ('capitalization', 'character substitution', 'numeric suffix', 'symbol suffix')]
-            if extra_patterns:
-                st.write(f"• **Structural patterns:** `{', '.join(extra_patterns)}`")
-            st.write(f"• **Mutation Vulnerability Score (MVS):** `{comp.mvs:.1f}/100`")
-            st.write(f"• **Empirical MVS (Phase 3):** `{comp.empirical_mvs:.1f}/100`")
+            # 2. PREDICTABLE MUTATION ANALYSIS
+            with col_right:
+                st.subheader("2. PREDICTABLE MUTATION ANALYSIS")
+                st.write(f"• **Dictionary base:** `{analysis.dictionary_base or 'None detected'}`")
+                st.write(f"• **Capitalization:** `{'Detected' if 'capitalization' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('capitalization', 0.0):.2f})")
+                st.write(f"• **Substitution:** `{'Detected' if 'character substitution' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('substitution', 0.0):.2f})")
+                st.write(f"• **Numeric suffix:** `{'Detected' if 'numeric suffix' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('numeric_suffix', 0.0):.2f})")
+                st.write(f"• **Symbol suffix:** `{'Detected' if 'symbol suffix' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('symbol_suffix', 0.0):.2f})")
+                extra_patterns = [m for m in analysis.mutations if m not in ('capitalization', 'character substitution', 'numeric suffix', 'symbol suffix')]
+                if extra_patterns:
+                    st.write(f"• **Structural patterns:** `{', '.join(extra_patterns)}`")
+                st.write(f"• **Mutation Vulnerability Score (MVS):** `{comp.mvs:.1f}/100`")
+                st.write(f"• **Empirical MVS (Phase 3):** `{comp.empirical_mvs:.1f}/100`")
 
-        st.markdown("---")
-        col_sec, col_base = st.columns(2)
+            st.markdown("---")
+            col_sec, col_base = st.columns(2)
 
-        # 3. SECURITY INDEX
-        with col_sec:
-            st.subheader("3. SECURITY INDEX")
-            st.write(f"• **Normalized entropy ($E_{{\\text{{norm}}}}$):** `{analysis.entropy_normalized:.4f}`")
-            st.write(f"• **Password Security Index (PSI):** `{comp.psi:.1f}/100`")
-            st.write(f"• **Risk category:** **{analysis.risk_category}**")
-            st.write(f"• **Calibrated PSI ($H_{{\\text{{ref}}}}=50$):** `{comp.calibrated_psi:.1f}/100`")
-            st.write(f"• **Calibrated classification:** `{comp.our_classification}`")
+            # 3. SECURITY INDEX
+            with col_sec:
+                st.subheader("3. SECURITY INDEX")
+                st.write(f"• **Normalized entropy ($E_{{\\text{{norm}}}}$):** `{analysis.entropy_normalized:.4f}`")
+                st.write(f"• **PSI (Fixed MVS):** `{comp.psi_fixed_mvs:.1f}/100`")
+                st.write(f"• **PSI (Empirical MVS):** `{comp.psi_empirical_mvs:.1f}/100`")
+                st.write(f"• **Risk category:** **{analysis.risk_category}**")
+                st.write(f"• **Calibrated PSI (Fixed MVS, $H_{{\\text{{ref}}}}=50$):** `{comp.calibrated_psi_fixed:.1f}/100`")
+                st.write(f"• **Calibrated PSI (Empirical MVS, $H_{{\\text{{ref}}}}=50$):** `{comp.calibrated_psi_empirical:.1f}/100`")
+                st.write(f"• **Calibrated classification ($\\tau=69.0$):** `{comp.our_classification}`")
 
-        # 4. BASELINE COMPARISON
-        with col_base:
-            st.subheader("4. BASELINE COMPARISON")
-            st.write(f"• **Conventional entropy assessment:** `{comp.conventional_score:.1f}/100` ({comp.entropy:.2f} bits)")
-            st.write(f"• **Existing estimator ({comp.existing_estimator_name}):** `{comp.existing_estimator_score}/4` — *{comp.existing_estimator_category}*")
-            st.write(f"• **Estimated offline crack time:** `{comp.existing_estimator_crack_time_display}` (log10 guesses: {comp.existing_estimator_guesses_log10:.2f})")
-            st.caption("*(Note: zxcvbn offline crack-time estimates assume 10,000 guesses/second hashing and do not reflect distributed GPU/ASIC cluster capabilities)*")
-            st.write(f"• **Proposed PSI:** `{comp.psi:.1f}/100`")
+            # 4. BASELINE COMPARISON
+            with col_base:
+                st.subheader("4. BASELINE COMPARISON")
+                st.write(f"• **Conventional entropy assessment:** `{comp.conventional_score:.1f}/100` ({comp.entropy:.2f} bits)")
+                st.write(f"• **Existing estimator ({comp.existing_estimator_name}):** `{comp.existing_estimator_score}/4` — *{comp.existing_estimator_category}*")
+                st.write(f"• **Estimated offline crack time:** `{comp.existing_estimator_crack_time_display}` (log10 guesses: {comp.existing_estimator_guesses_log10:.2f})")
+                st.caption("*(Note: zxcvbn offline crack-time estimates assume 10,000 guesses/second hashing and do not reflect distributed GPU/ASIC cluster capabilities)*")
+                st.write(f"• **Proposed PSI (Fixed MVS):** `{comp.psi_fixed_mvs:.1f}/100`")
 
         # 5. EXPLANATION
         st.markdown("---")

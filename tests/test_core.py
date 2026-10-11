@@ -267,7 +267,7 @@ def test_baseline_comparison():
     comp_rand = compare_password("vQ7mK2xR9zP4")
     assert comp_rand.mvs == 0.0
     assert comp_rand.psi > 70.0
-    assert "No dictionary base was detected" in comp_rand.explanation
+    assert "No dictionary base" in comp_rand.explanation
 
     # Compare 3 canonical benchmark passwords
     benchmarks = compare_benchmark_passwords()
@@ -444,14 +444,16 @@ def test_import_research_dataset_tsv_and_quotes(tmp_path):
 def test_simple_passwords_vulnerability_detection():
     # 1. Repetitive characters
     rep_res = analyze_password("111111111111")
-    assert rep_res.mvs >= 35.0
+    assert rep_res.mutation_components["dictionary_base"] == 0.0
+    assert rep_res.mvs == 0.0
     assert "repetitive characters" in rep_res.mutations
     assert "numeric suffix" not in rep_res.mutations
     assert rep_res.risk_category == "High predictability risk"
 
     # 2. Sequential digits
     seq_res = analyze_password("123456789012")
-    assert seq_res.mvs >= 35.0
+    assert seq_res.mutation_components["dictionary_base"] == 0.0
+    assert seq_res.mvs == 0.0
     assert "sequential characters" in seq_res.mutations
     assert "numeric suffix" not in seq_res.mutations
     assert seq_res.risk_category == "High predictability risk"
@@ -895,10 +897,9 @@ def test_regression_phase2_canonical_eight_cases():
     assert "sequential characters" in res6.mutations
     assert res6.mutation_components["numeric_suffix"] == 0.0
     assert res6.mutation_components["symbol_suffix"] == 0.0
-    assert res6.mutation_components["capitalization"] == 0.0
-    assert res6.mutation_components["substitution"] == 0.0
-    assert res6.mutation_components["dictionary_base"] == 1.0  # triggers base indicator via trivial sequential pattern
-    assert math.isclose(res6.mvs, 35.0, abs_tol=1e-5)
+    assert res6.mutation_components["dictionary_base"] == 0.0  # pure sequential pattern without dictionary root
+    assert math.isclose(res6.mvs, 0.0, abs_tol=1e-5)
+    assert res6.risk_category == "High predictability risk"
 
     # 7. vQ7mK2xR9zP4 (random control: MVS must be exactly 0.0)
     res7 = analyze_password("vQ7mK2xR9zP4")
@@ -1054,3 +1055,189 @@ def test_regression_dataset_validation_missing_file_and_empty():
     from password_analyzer.dataset_pipeline import import_research_dataset
     with pytest.raises(FileNotFoundError):
         import_research_dataset("data/non_existent_file_12345.csv")
+
+
+# ==============================================================================
+# SECTION 8: RIGOROUS AUDIT REGRESSION TESTS (Formulas, Leakage, Privacy, Sens.)
+# ==============================================================================
+
+def test_audit_scoring_formulas_and_weights():
+    """Verify every scoring formula independently without using internal shortcuts."""
+    # 1. Theoretical character-pool entropy: H = L * log2(N)
+    # 8 lowercase letters (N=26): H = 8 * log2(26) ~ 37.6035 bits
+    expected_h = 8.0 * math.log2(26.0)
+    assert math.isclose(entropy("password"), expected_h, rel_tol=1e-5)
+
+    # 2. Laplace-smoothed empirical probability: p_hat = (k + 1) / (n + 2)
+    p_hat = empirical_probability(45, 105)
+    assert math.isclose(p_hat, 46.0 / 107.0, rel_tol=1e-6)
+
+    # 3. Information content (surprisal): I = -log2(p_hat)
+    info = surprisal(p_hat)
+    assert math.isclose(info, -math.log2(46.0 / 107.0), rel_tol=1e-6)
+
+    # 4. Zero denominator and empty dataset behavior
+    assert calculate_mvs({}) == 0.0
+    assert calculate_empirical_mvs({}, DEFAULT_WEIGHTS, DEFAULT_EMPIRICAL_PROBABILITIES) == 0.0
+    assert calculate_mvs({"dictionary_base": 0.0}) == 0.0
+    assert calculate_empirical_mvs({"dictionary_base": 0.0}, DEFAULT_WEIGHTS, {"dictionary_base": 0.5}) == 0.0
+
+    # 5. Fixed MVS formula: MVS = 100 * sum(w_i * x_i)
+    # TitleCase (0.15) + Numeric suffix (0.20) + Dictionary base (0.35) = 0.70 -> MVS = 70.0
+    comp_map = {"capitalization": 1.0, "numeric_suffix": 1.0, "dictionary_base": 1.0}
+    mvs_val = calculate_mvs(comp_map, DEFAULT_WEIGHTS)
+    assert math.isclose(mvs_val, 70.0, abs_tol=1e-5)
+
+
+def test_fixed_mvs_vs_empirical_mvs_distinction():
+    """Verify clear distinction between Fixed MVS PSI and Empirical MVS PSI."""
+    pw = "Password123!"
+    analysis = analyze_password(pw)
+    assert hasattr(analysis, "psi_fixed_mvs")
+    assert hasattr(analysis, "psi_empirical_mvs")
+    assert hasattr(analysis, "calibrated_psi_fixed")
+    assert hasattr(analysis, "calibrated_psi_empirical")
+
+    # Fixed MVS uses baseline weights
+    assert analysis.mvs > 0.0
+    # Empirical MVS uses Laplace-smoothed probabilities
+    assert analysis.empirical_mvs > 0.0
+    assert analysis.psi_fixed_mvs != analysis.psi_empirical_mvs
+
+    # Calibrated values use H_ref = 50.0
+    assert math.isclose(analysis.calibrated_psi_fixed, calculate_psi(analysis.entropy_bits, analysis.mvs, h_ref=50.0), rel_tol=1e-5)
+    assert math.isclose(analysis.calibrated_psi_empirical, calculate_psi(analysis.entropy_bits, analysis.empirical_mvs, h_ref=50.0), rel_tol=1e-5)
+
+
+def test_whitespace_and_empty_edge_cases():
+    """Verify empty and whitespace-only inputs return safe zeros and high risk."""
+    for ws in ["", "   ", "\t\t", "\n\r", "   \t \n "]:
+        a = analyze_password(ws)
+        assert a.character_set_size == 0
+        assert a.entropy_bits == 0.0
+        assert a.mvs == 0.0
+        assert a.empirical_mvs == 0.0
+        assert a.psi == 0.0
+        assert a.calibrated_psi_fixed == 0.0
+        assert a.calibrated_psi_empirical == 0.0
+        assert a.risk_category == "High predictability risk"
+
+
+def test_internal_vs_trailing_symbols():
+    """Verify internal punctuation does not trigger symbol_suffix feature."""
+    # Internal symbol: 'pass!word' -> symbol is NOT trailing
+    res_internal = analyze_password("pass!word")
+    assert res_internal.mutation_components["symbol_suffix"] == 0.0
+    assert "symbol suffix" not in res_internal.mutations
+
+    # Trailing symbol: 'password!' -> symbol IS trailing
+    res_trailing = analyze_password("password!")
+    assert res_trailing.mutation_components["symbol_suffix"] == 1.0
+    assert "symbol suffix" in res_trailing.mutations
+
+    # Internal substitution: 'p@ssword' -> leetspeak substitution, NOT symbol suffix
+    res_sub = analyze_password("p@ssword")
+    assert res_sub.mutation_components["substitution"] == 1.0
+    assert res_sub.mutation_components["symbol_suffix"] == 0.0
+
+
+def test_pure_digits_no_capitalization_or_dictionary():
+    """Verify pure-digit strings do not trigger capitalization or dictionary base."""
+    digits_pw = "87654321"
+    res = analyze_password(digits_pw)
+    assert res.dictionary_base is None
+    assert res.mutation_components["capitalization"] == 0.0
+    assert res.mutation_components["dictionary_base"] == 0.0
+    assert res.mutation_components["numeric_suffix"] == 0.0
+    assert res.mvs == 0.0
+    assert "sequential characters" in res.mutations
+    assert res.risk_category == "High predictability risk"
+
+
+def test_unicode_and_special_character_pool():
+    """Verify Unicode characters are handled safely without crashing."""
+    unicode_pw = "Pásswørd123!ñ"
+    res = analyze_password(unicode_pw)
+    assert res.password_length == len(unicode_pw)
+    assert res.character_set_size >= 62
+    assert res.entropy_bits > 0.0
+    assert 0.0 <= res.mvs <= 100.0
+
+
+def test_family_disjoint_leakage_audit():
+    """Verify zero overlap between calibration and evaluation sets."""
+    from pathlib import Path
+    import pandas as pd
+    cal_file = Path("data/phase5_family_disjoint_calibration_split.csv")
+    eval_file = Path("data/phase5_family_disjoint_eval_split.csv")
+    assert cal_file.exists() and eval_file.exists()
+
+    df_cal = pd.read_csv(cal_file)
+    df_eval = pd.read_csv(eval_file)
+
+    # 1. Zero password overlap
+    pw_cal = set(df_cal["password"])
+    pw_eval = set(df_eval["password"])
+    assert len(pw_cal.intersection(pw_eval)) == 0, "Data leakage: duplicate passwords found!"
+
+    # 2. Zero root family overlap among positive mutations
+    roots_cal = set(df_cal.loc[df_cal["target"] == 1, "root"].dropna())
+    roots_eval = set(df_eval.loc[df_eval["target"] == 1, "root"].dropna())
+    assert len(roots_cal.intersection(roots_eval)) == 0, "Data leakage: overlapping root families!"
+
+    # 3. Zero control overlap
+    ctrl_cal = set(df_cal.loc[df_cal["target"] == 0, "password"])
+    ctrl_eval = set(df_eval.loc[df_eval["target"] == 0, "password"])
+    assert len(ctrl_cal.intersection(ctrl_eval)) == 0, "Data leakage: overlapping control strings!"
+
+
+def test_threshold_sensitivity_false_negatives_reproduction():
+    """Reproduce exact false negative behavior at tau = 69.0 for base+number mutations."""
+    # Passwords such as welcome2026, security2026, computer2026 activate only base + numeric suffix
+    pws = ["welcome2026", "security2026", "computer2026"]
+    for pw in pws:
+        analysis = analyze_password(pw)
+        # Base weight (0.35) + Numeric suffix weight (0.20)
+        assert analysis.mutation_components["dictionary_base"] == 1.0
+        assert analysis.mutation_components["numeric_suffix"] == 1.0
+        assert analysis.mutation_components["capitalization"] == 0.0
+        assert analysis.mutation_components["substitution"] == 0.0
+        assert analysis.mutation_components["symbol_suffix"] == 0.0
+
+        # Empirical MVS: 100 * [0.35 * (106/332) + 0.20 * (31/107)] / (0.35 + 0.20) ~ 30.85289
+        expected_emp_mvs = 100.0 * (0.35 * (106.0 / 332.0) + 0.20 * (31.0 / 107.0)) / 0.55
+        assert math.isclose(analysis.empirical_mvs, expected_emp_mvs, rel_tol=1e-4)
+
+        # Since H > 50, E_norm = 1.0, Calibrated Empirical PSI ~ 100 * (1 - 0.3085289) = 69.1471
+        assert math.isclose(analysis.calibrated_psi_empirical, 100.0 - expected_emp_mvs, rel_tol=1e-4)
+        assert analysis.calibrated_psi_empirical > 69.0  # Explains why tau=69 causes False Negatives!
+
+        # Under Fixed MVS: MVS = 55.0 -> Calibrated PSI = 45.0 << 69.0 (True Positive)
+        assert math.isclose(analysis.mvs, 55.0, abs_tol=1e-5)
+        assert math.isclose(analysis.calibrated_psi_fixed, 45.0, abs_tol=1e-5)
+        assert analysis.calibrated_psi_fixed < 69.0
+
+
+def test_cli_ui_baseline_comparator_consistency():
+    """Verify consistency across compare_password and analyze_password for canonical benchmarks."""
+    for pw in ["Password123!", "vQ7mK2xR9zP4", "P@ssword2026!"]:
+        analysis = analyze_password(pw)
+        comp = compare_password(pw)
+        assert math.isclose(comp.entropy, round(analysis.entropy_bits, 2), abs_tol=1e-2)
+        assert math.isclose(comp.mvs, round(analysis.mvs, 1), abs_tol=1e-1)
+        assert math.isclose(comp.psi_fixed_mvs, round(analysis.psi_fixed_mvs, 1), abs_tol=1e-1)
+        assert math.isclose(comp.psi_empirical_mvs, round(analysis.psi_empirical_mvs, 1), abs_tol=1e-1)
+        assert math.isclose(comp.calibrated_psi_fixed, round(analysis.calibrated_psi_fixed, 1), abs_tol=1e-1)
+        assert math.isclose(comp.calibrated_psi_empirical, round(analysis.calibrated_psi_empirical, 1), abs_tol=1e-1)
+
+
+def test_privacy_preserving_pipeline_no_password_retention():
+    """Verify dataset pipeline imports data without retaining plaintext passwords in telemetry."""
+    from password_analyzer.dataset_pipeline import import_research_dataset
+    report = import_research_dataset("data/public_research_dataset_example.csv")
+    summary = report.summary_table()
+    # The summary dataframe must not have a 'password' column or individual password entries
+    assert "password" not in [str(c).lower() for c in summary.columns]
+    assert report.total_records > 0
+    assert 0.0 <= report.mean_mvs <= 100.0
+

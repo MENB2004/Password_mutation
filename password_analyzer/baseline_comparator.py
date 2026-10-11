@@ -59,6 +59,13 @@ class BaselineComparison:
     existing_estimator_warning: Optional[str]
     existing_estimator_suggestions: List[str]
     explanation: str
+    # Explicitly named fields:
+    psi_fixed_mvs: float = 0.0
+    psi_empirical_mvs: float = 0.0
+    calibrated_psi_fixed: float = 0.0
+    calibrated_classification_fixed: str = ""
+    calibrated_psi_empirical: float = 0.0
+    calibrated_classification_empirical: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -69,7 +76,7 @@ def get_existing_estimator_assessment(password: str) -> Dict[str, Any]:
 
     If zxcvbn is not installed or the input is empty/malformed, returns a safe fallback.
     """
-    if not password:
+    if not password or not password.strip():
         name = "Dropbox zxcvbn" if (HAS_ZXCVBN and zxcvbn is not None) else "Heuristic Estimator"
         return {
             "name": name,
@@ -78,7 +85,7 @@ def get_existing_estimator_assessment(password: str) -> Dict[str, Any]:
             "guesses_log10": 0.0,
             "crack_time": "instant",
             "category": ZXCVBN_SCORE_CATEGORIES[0],
-            "warning": "Password cannot be empty.",
+            "warning": "Password cannot be empty or whitespace-only.",
             "suggestions": ["Enter a non-empty test password."],
         }
 
@@ -132,38 +139,47 @@ def generate_explanation(analysis, est_res: Dict[str, Any]) -> str:
     muts = analysis.mutations
     h = analysis.entropy_bits
 
-    if analysis.password_length == 0:
+    if analysis.password_length == 0 or not analysis.dictionary_base and analysis.character_set_size == 0:
         return (
-            "This test input is empty. An empty password has an exhausted search space (0 combinations), "
-            f"0.00 bits of theoretical entropy, and PSI: 0.0/100 ({analysis.risk_category}). "
+            "This test input is empty or whitespace-only. It has an exhausted search space (0 combinations), "
+            f"0.00 bits of theoretical character-pool entropy, and PSI: 0.0/100 ({analysis.risk_category}). "
             f"Existing estimator ({est_res['name']}) scores it {est_res['score']}/4 ('{est_res['category']}')."
         )
-    elif p or muts or analysis.mvs > 0:
-        base_desc = f"dictionary root '{p}'" if p else "predictable structural pattern"
+    elif p:
         mut_desc = f"alongside predictable mutations ({', '.join(muts)})" if muts else "with no subsequent mutations"
         return (
-            f"Although this password achieves a theoretical Shannon entropy of {h:.2f} bits, "
-            f"the detection of {base_desc} {mut_desc} "
-            f"increases its Mutation Vulnerability Score (MVS: {analysis.mvs:.1f}/100). "
-            f"Consequently, the Password Security Index discounts the score to {analysis.psi:.1f}/100 "
+            f"Although this password achieves a theoretical character-pool Shannon entropy of {h:.2f} bits "
+            f"(assuming uniform independent selection), the detection of dictionary root '{p}' {mut_desc} "
+            f"increases its Mutation Vulnerability Score (Fixed MVS: {analysis.mvs:.1f}/100, "
+            f"Empirical MVS: {analysis.empirical_mvs:.1f}/100). "
+            f"Consequently, the Password Security Index discounts the score to PSI_fixed: {analysis.psi:.1f}/100 "
             f"({analysis.risk_category}). Existing estimator ({est_res['name']}) scores it "
             f"{est_res['score']}/4 ('{est_res['category']}')."
+        )
+    elif muts:
+        # Non-dictionary structural patterns (e.g. sequential digits '12345678')
+        return (
+            f"No dictionary root word was detected in this password. However, predictable structural patterns "
+            f"were detected ({', '.join(muts)}), which reduce practical search complexity despite theoretical "
+            f"character-pool entropy of {h:.2f} bits. Mutation indicators remain 0.0/100 (as MVS strictly measures "
+            f"dictionary mutations), while risk category is flagged as '{analysis.risk_category}'. "
+            f"Existing estimator ({est_res['name']}) scores it {est_res['score']}/4 ('{est_res['category']}')."
         )
     elif analysis.password_length < 8:
         return (
             f"This password is critically short ({analysis.password_length} characters). "
             f"Regardless of character diversity, short passwords have an exhausted search space "
-            f"and can be rapidly brute-forced. It achieves {h:.2f} bits of theoretical entropy and PSI: {analysis.psi:.1f}/100 "
-            f"({analysis.risk_category}). Existing estimator ({est_res['name']}) scores it "
-            f"{est_res['score']}/4 ('{est_res['category']}')."
+            f"and can be rapidly brute-forced. It achieves {h:.2f} bits of theoretical character-pool entropy "
+            f"and PSI: {analysis.psi:.1f}/100 ({analysis.risk_category}). "
+            f"Existing estimator ({est_res['name']}) scores it {est_res['score']}/4 ('{est_res['category']}')."
         )
     else:
         return (
-            f"No dictionary base was detected in this password. The password exhibits non-predictable, "
-            f"pseudo-random character distribution, receiving an MVS of {analysis.mvs:.1f}/100. "
-            f"Its security is primarily governed by character pool diversity and length, "
-            f"yielding PSI: {analysis.psi:.1f}/100 ({analysis.risk_category}). "
-            f"Existing estimator ({est_res['name']}) scores it {est_res['score']}/4 ('{est_res['category']}')."
+            f"No dictionary base or structural patterns were detected in this password. "
+            f"The password exhibits non-predictable, pseudo-random character distribution, receiving an MVS of {analysis.mvs:.1f}/100. "
+            f"Its theoretical character-pool Shannon entropy is {h:.2f} bits, yielding PSI: {analysis.psi:.1f}/100 "
+            f"({analysis.risk_category}). Existing estimator ({est_res['name']}) scores it "
+            f"{est_res['score']}/4 ('{est_res['category']}')."
         )
 
 
@@ -178,7 +194,7 @@ def compare_password(password: str,
 
     # Conventional length/diversity score (0-100)
     # Conventional meters award ~25 points for length >=8, and ~25 per character class
-    if analysis.password_length == 0:
+    if analysis.password_length == 0 or analysis.character_set_size == 0:
         conv_score = 0.0
     else:
         types_count = sum(1 for v in analysis.character_types.values() if v)
@@ -209,6 +225,12 @@ def compare_password(password: str,
         existing_estimator_warning=est_res["warning"],
         existing_estimator_suggestions=est_res["suggestions"],
         explanation=explanation,
+        psi_fixed_mvs=round(analysis.psi_fixed_mvs, 1),
+        psi_empirical_mvs=round(analysis.psi_empirical_mvs, 1),
+        calibrated_psi_fixed=round(analysis.calibrated_psi_fixed, 1),
+        calibrated_classification_fixed=analysis.calibrated_classification_fixed,
+        calibrated_psi_empirical=round(analysis.calibrated_psi_empirical, 1),
+        calibrated_classification_empirical=analysis.calibrated_classification_empirical,
     )
 
 
@@ -231,13 +253,14 @@ def build_comparison_dataframe(comparisons: List[BaselineComparison]) -> pd.Data
             "Password": c.password,
             "Length": c.length,
             "Pool (N)": c.character_pool,
-            "Entropy (H bits)": c.entropy,
+            "Theoretical Entropy (H bits)": c.entropy,
             "Conventional Score": c.conventional_score,
-            "Proposed MVS": c.mvs,
+            "Fixed MVS": c.mvs,
             "Empirical MVS": c.empirical_mvs,
-            "Proposed PSI": c.psi,
-            "Empirical PSI": c.empirical_psi,
-            "Calibrated PSI (H_ref=50)": c.calibrated_psi,
+            "PSI (Fixed MVS)": c.psi_fixed_mvs,
+            "PSI (Empirical MVS)": c.psi_empirical_mvs,
+            "Calibrated PSI (Fixed MVS, H_ref=50)": c.calibrated_psi_fixed,
+            "Calibrated PSI (Empirical MVS, H_ref=50)": c.calibrated_psi_empirical,
             "Existing Estimator (Score)": f"{c.existing_estimator_score}/4 ({c.existing_estimator_category})",
             "Existing Estimator Crack Time": c.existing_estimator_crack_time_display,
             "Proposed Classification": c.our_classification,

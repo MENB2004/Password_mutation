@@ -30,6 +30,10 @@ from .dataset_pipeline import (
     import_research_dataset,
     create_example_public_research_dataset,
 )
+from .experiment_runner import (
+    run_baseline_comparison_experiment,
+    run_family_disjoint_evaluation,
+)
 
 __all__ = [
     "analyze_password",
@@ -58,4 +62,6 @@ __all__ = [
     "DatasetAggregateReport",
     "import_research_dataset",
     "create_example_public_research_dataset",
+    "run_baseline_comparison_experiment",
+    "run_family_disjoint_evaluation",
 ]

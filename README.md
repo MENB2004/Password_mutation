@@ -179,24 +179,43 @@ python main.py "P@ssword2026!"
 
 ### 3. Automated Experiments & Baseline Benchmark
 
-Run the full experimental suite and generate all CSV datasets and publication figures:
+Run the baseline comparison experiment, the family-disjoint held-out evaluation, or both:
 ```bash
+# Run baseline comparison experiment (N=330)
 python experiments.py
+
+# Run Phase 5 family-disjoint held-out evaluation (N=180 calibration, N=180 eval)
+python experiments.py --eval-family-disjoint
+
+# Run both experiments in a single run
+python experiments.py --all
 ```
 Output results summary on synthetic benchmark corpus ($N=330$):
-- **Proposed PSI:** Accuracy: `0.9788`, Precision: `1.0000`, Recall: `0.9333`, F1: `0.9655`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
-- **Proposed MVS:** Accuracy: `1.0000`, Precision: `1.0000`, Recall: `1.0000`, F1: `1.0000`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Proposed PSI (Fixed MVS):** Accuracy: `1.0000`, Precision: `1.0000`, Recall: `1.0000`, F1: `1.0000`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Proposed PSI (Empirical MVS):** Accuracy: `0.9788`, Precision: `1.0000`, Recall: `0.9333`, F1: `0.9655`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Proposed Fixed MVS:** Accuracy: `1.0000`, Precision: `1.0000`, Recall: `1.0000`, F1: `1.0000`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Proposed Empirical MVS:** Accuracy: `1.0000`, Precision: `1.0000`, Recall: `1.0000`, F1: `1.0000`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
 - **Dropbox zxcvbn:** Accuracy: `0.9242`, Precision: `0.8077`, Recall: `1.0000`, F1: `0.8936`, ROC-AUC: `0.9937`, PR-AUC: `0.9780`
 - **Conventional Entropy:** Accuracy: `0.8000`, Precision: `0.6211`, Recall: `0.9524`, F1: `0.7519`, ROC-AUC: `0.9365`, PR-AUC: `0.8913`
+
+Output results on held-out Family-Disjoint Evaluation Set ($N=180$, 0 overlapping passwords/roots/controls):
+- **Proposed PSI (Fixed MVS, $\tau=69$):** Accuracy: `1.0000`, Precision: `1.0000`, Recall: `1.0000`, F1: `1.0000`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Proposed PSI (Empirical MVS, $\tau=69$):** Accuracy: `0.9389`, Precision: `1.0000`, Recall: `0.8167`, F1: `0.8991`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Proposed Fixed MVS ($\ge 20$):** Accuracy: `1.0000`, Precision: `1.0000`, Recall: `1.0000`, F1: `1.0000`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Proposed Empirical MVS ($\ge 20$):** Accuracy: `1.0000`, Precision: `1.0000`, Recall: `1.0000`, F1: `1.0000`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Dropbox zxcvbn ($\le 2$):** Accuracy: `1.0000`, Precision: `1.0000`, Recall: `1.0000`, F1: `1.0000`, ROC-AUC: `1.0000`, PR-AUC: `1.0000`
+- **Conventional Entropy ($< \text{median}$):** Accuracy: `0.8556`, Precision: `0.6977`, Recall: `1.0000`, F1: `0.8219`, ROC-AUC: `0.9900`, PR-AUC: `0.9806`
 
 Generated artifacts:
 - `results/baseline_comparison.csv`
 - `results/BASELINE_COMPARISON_REPORT.md`
+- `results/phase5_family_disjoint_evaluation.csv`
+- `results/PHASE_5_REPORT.md`
 - `results/baseline_*.png` (8 publication figures)
 
 ### 4. Running Pytest Unit Tests
 
-Run the complete 52-test unit test suite covering all mathematical calculations, mutation detectors, boundary conditions, edge cases, and regression tests:
+Run the complete 62-test unit test suite covering scoring formulas, Laplace smoothing, MVS/PSI variants, threshold sensitivity, leakage audits, Unicode/whitespace edge cases, and privacy telemetry:
 ```bash
 pytest -v
 ```
@@ -223,7 +242,7 @@ password_mutation_project/
 │   └── cli.py                               # Command-line interface logic
 │
 ├── tests/
-│   └── test_core.py                         # 52 comprehensive pytest unit tests
+│   └── test_core.py                         # 62 comprehensive pytest unit tests
 │
 ├── data/
 │   ├── synthetic_password_dataset_phase3.csv # Research evaluation corpus (330 passwords)
