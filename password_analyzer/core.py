@@ -364,7 +364,7 @@ def find_dictionary_base(password: str,
     empty/whitespace inputs, and unsupported dictionary entries safely return None without
     being falsely classified.
     """
-    if not password or not password.strip():
+    if not password or not password.strip() or password.strip().isdigit():
         return None
 
     if wordlist is not None:

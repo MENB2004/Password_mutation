@@ -36,6 +36,12 @@ from password_analyzer import (
     load_wordlist_entries,
     get_current_wordlist_info,
     clear_wordlist_cache,
+    load_official_openwall_wordlist,
+    load_curated_wordlist,
+    load_builtin_wordlist,
+    get_openwall_provenance,
+    OFFICIAL_OPENWALL_PATH,
+    CURATED_WORDLIST_PATH,
 )
 from password_analyzer.core import find_dictionary_base, COMMON_WORDS
 
@@ -300,3 +306,108 @@ def test_application_works_with_both_expanded_and_fallback_path(tmp_path):
     comp_fallback = compare_password("Password123!", wordlist_path=missing_file)
     assert comp_fallback.mvs == 80.0
     assert "fallback" in comp_fallback.wordlist_source.lower()
+
+
+# ==============================================================================
+# 7. OFFICIAL OPENWALL WORDLIST TESTS & MULTI-TIER FALLBACK
+# ==============================================================================
+
+def test_official_openwall_wordlist_direct_loading():
+    """Verify official Openwall wordlist loads gzip-compressed file and matches expected metadata."""
+    clear_wordlist_cache()
+    words_set, sorted_words, info = load_official_openwall_wordlist()
+
+    assert info.is_official is True
+    assert info.is_expanded is True
+    assert info.source_type == "official_openwall"
+    assert info.file_format == "gzip"
+    assert info.sha256_checksum == "1e7a12ddd07cfbdd7c3b774230be33968e506072ae6fec4ff195b577f51fb6c1"
+    assert info.count == 3254
+
+    # Common passwords present in the official Openwall distribution
+    for sample in ["password", "welcome", "sunshine", "football", "shadow"]:
+        assert sample in words_set, f"Expected '{sample}' in official Openwall wordlist"
+
+    # Numeric sequence filtered out: pure numbers must not be present as dictionary roots
+    assert "123456" not in words_set
+    assert "12345678" not in words_set
+
+
+def test_custom_gzip_compressed_wordlist_loading(tmp_path):
+    """Verify loader seamlessly supports custom gzip-compressed (.gz) wordlists."""
+    import gzip
+
+    gz_file = tmp_path / "custom_dict.txt.gz"
+    plain_content = "# Custom compressed dictionary\nalpha\nbravo\ncharlie\nALPHA\nbravo  \n"
+    gz_file.write_bytes(gzip.compress(plain_content.encode("utf-8")))
+
+    clear_wordlist_cache()
+    words_set, sorted_words, info = load_wordlist_entries(gz_file)
+
+    assert info.file_format == "gzip"
+    assert info.is_expanded is True
+    assert info.count == 3
+    assert words_set == {"alpha", "bravo", "charlie"}
+
+
+def test_multi_tier_fallback_behavior(tmp_path, monkeypatch):
+    """Verify graceful fallback: official -> curated -> built-in vocabulary."""
+    clear_wordlist_cache()
+
+    # 1. Official file missing -> falls back to curated wordlist
+    missing_openwall = tmp_path / "nonexistent_openwall.txt.gz"
+    _, _, info_curated_fb = load_wordlist_entries(missing_openwall)
+    assert info_curated_fb.is_expanded is True
+    assert info_curated_fb.count > 2800
+
+    # 2. Both official and curated missing -> falls back to built-in vocabulary
+    monkeypatch.setattr("password_analyzer.wordlist.CURATED_WORDLIST_PATH", tmp_path / "missing_curated.txt")
+    clear_wordlist_cache()
+    _, sorted_words, info_builtin_fb = load_wordlist_entries(missing_openwall)
+    assert info_builtin_fb.is_expanded is False
+    assert info_builtin_fb.source_type == "builtin_fallback"
+    assert "fallback" in info_builtin_fb.label.lower()
+    assert len(sorted_words) == len(COMMON_WORDS)
+
+    # 3. Explicit built-in loader always returns built-in vocabulary
+    _, builtin_words, builtin_info = load_builtin_wordlist()
+    assert builtin_info.source_type == "builtin_fallback"
+    assert len(builtin_words) == len(COMMON_WORDS)
+
+
+def test_numeric_sequences_remain_structural_under_openwall():
+    """Verify pure numeric sequences are not classified as dictionary bases under Openwall wordlist."""
+    for seq in ["12345678", "9876543210", "11111111"]:
+        res = analyze_password(seq, wordlist_path=OFFICIAL_OPENWALL_PATH)
+        assert res.dictionary_base is None
+        assert res.mvs == 0.0
+        assert res.empirical_mvs == 0.0
+        assert any(m in res.mutations for m in ["sequential characters", "repetitive characters"])
+
+
+def test_openwall_provenance_and_licensing_metadata():
+    """Verify official Openwall provenance metadata contains real URLs, dates, and license."""
+    prov = get_openwall_provenance()
+
+    assert prov["source_url"] == "https://download.openwall.net/pub/wordlists/passwords/password.gz"
+    assert prov["homepage"] == "https://www.openwall.com/wordlists/"
+    assert prov["download_date"] == "2026-10-12"
+    assert "Solar Designer" in prov["copyright"]
+    assert "free for personal, educational, research, and non-commercial use" in prov["license"]
+    assert prov["compressed_sha256"] == "1e7a12ddd07cfbdd7c3b774230be33968e506072ae6fec4ff195b577f51fb6c1"
+    assert prov["uncompressed_sha256"] == "2dd79902220fa879a330d9246da147984b705087a52ad17de3803acfafe7badc"
+
+
+def test_openwall_detection_coverage_on_mutations():
+    """Verify mutation detection functions accurately when official Openwall wordlist is active."""
+    cases = [
+        ("Welcome2026", "welcome", "numeric suffix"),
+        ("Sunshine!", "sunshine", "symbol suffix"),
+        ("P@ssword99", "password", "character substitution"),
+    ]
+    for pw, expected_base, expected_mutation in cases:
+        res = analyze_password(pw, wordlist_path=OFFICIAL_OPENWALL_PATH)
+        assert res.dictionary_base == expected_base
+        assert expected_mutation in res.mutations
+        assert res.mvs > 0.0
+        assert res.empirical_mvs > 0.0

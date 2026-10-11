@@ -40,6 +40,12 @@ from .wordlist import (
     get_current_wordlist_info,
     get_active_wordlist,
     clear_wordlist_cache,
+    load_official_openwall_wordlist,
+    load_curated_wordlist,
+    load_builtin_wordlist,
+    get_openwall_provenance,
+    OFFICIAL_OPENWALL_PATH,
+    CURATED_WORDLIST_PATH,
 )
 
 __all__ = [
@@ -76,4 +82,10 @@ __all__ = [
     "get_current_wordlist_info",
     "get_active_wordlist",
     "clear_wordlist_cache",
+    "load_official_openwall_wordlist",
+    "load_curated_wordlist",
+    "load_builtin_wordlist",
+    "get_openwall_provenance",
+    "OFFICIAL_OPENWALL_PATH",
+    "CURATED_WORDLIST_PATH",
 ]

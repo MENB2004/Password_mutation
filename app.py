@@ -23,7 +23,12 @@ from password_analyzer.dataset_pipeline import (
     import_research_dataset,
     create_example_public_research_dataset,
 )
-from password_analyzer.wordlist import get_current_wordlist_info
+from password_analyzer.wordlist import (
+    get_current_wordlist_info,
+    OFFICIAL_OPENWALL_PATH,
+    CURATED_WORDLIST_PATH,
+    get_openwall_provenance,
+)
 
 # ==============================================================================
 # FEATURE FLAGS & CONFIGURATION
@@ -92,13 +97,23 @@ if SHOW_MODEL_CONFIGURATION:
     else:
         h_ref = st.sidebar.slider("Reference entropy H_ref (bits)", 40, 160, 80, step=5)
 
-    # Dictionary provider status (only displayed when model configuration is enabled)
-    st.sidebar.subheader("Dictionary Provider")
-    st.sidebar.caption(f"Active provider: {get_current_wordlist_info().label}")
+    # Dictionary provider selection (only displayed when model configuration is enabled)
+    st.sidebar.subheader("Dictionary Wordlist Source")
+    dict_options = ["Curated Lexical Roots (2,832 roots)", "Official Openwall Wordlist (password.gz)", "Built-in Fallback (124 roots)"]
+    selected_dict = st.sidebar.selectbox("Active Wordlist", options=dict_options, index=0)
+    if "Official" in selected_dict:
+        active_wordlist_path = OFFICIAL_OPENWALL_PATH
+    elif "Built-in" in selected_dict:
+        active_wordlist_path = "builtin_fallback"
+    else:
+        active_wordlist_path = CURATED_WORDLIST_PATH
+    current_dict_info = get_current_wordlist_info(active_wordlist_path if active_wordlist_path != "builtin_fallback" else None)
+    st.sidebar.caption(f"Status: {current_dict_info.label}")
 else:
     # Default model configuration when the configuration UI is disabled
     weights = DEFAULT_WEIGHTS.copy()
     h_ref = DEFAULT_H_REF
+    active_wordlist_path = None
 
 # Example quick-fill buttons
 st.sidebar.subheader("Quick Example Passwords")
@@ -139,8 +154,8 @@ with main_tabs[0]:
 
     if password_input:
         try:
-            comp = compare_password(password_input, weights=weights, h_ref=h_ref)
-            analysis = analyze_password(password_input, weights=weights, h_ref=h_ref)
+            comp = compare_password(password_input, weights=weights, h_ref=h_ref, wordlist_path=active_wordlist_path)
+            analysis = analyze_password(password_input, weights=weights, h_ref=h_ref, wordlist_path=active_wordlist_path)
         except Exception:
             st.error("⚠️ An error occurred during password analysis. Please verify the input characters.")
             comp = None
@@ -179,7 +194,7 @@ with main_tabs[0]:
             # 2. PREDICTABLE MUTATION ANALYSIS
             with col_right:
                 st.subheader("2. PREDICTABLE MUTATION ANALYSIS")
-                st.write(f"• **Dictionary source:** {get_current_wordlist_info().label}")
+                st.write(f"• **Dictionary source:** {analysis.wordlist_source or get_current_wordlist_info(active_wordlist_path).label}")
                 st.write(f"• **Dictionary base:** `{analysis.dictionary_base or 'None detected'}`")
                 st.write(f"• **Capitalization:** `{'Detected' if 'capitalization' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('capitalization', 0.0):.2f})")
                 st.write(f"• **Substitution:** `{'Detected' if 'character substitution' in analysis.mutations else 'None'}` (score: {analysis.mutation_components.get('substitution', 0.0):.2f})")
@@ -234,7 +249,7 @@ with main_tabs[1]:
         "**Password A** (predictable suffix), **Password B** (random control), and **Password C** (complex combination)."
     )
 
-    benchmark_comps = compare_benchmark_passwords(weights=weights, h_ref=h_ref)
+    benchmark_comps = compare_benchmark_passwords(weights=weights, h_ref=h_ref, wordlist_path=active_wordlist_path)
     df_benchmark = build_comparison_dataframe(benchmark_comps)
 
     st.dataframe(df_benchmark, width="stretch", hide_index=True)
@@ -287,7 +302,7 @@ with main_tabs[2]:
     )
 
     target_input = password_input if password_input else default_input
-    sample_analysis = analyze_password(target_input, weights=weights, h_ref=h_ref)
+    sample_analysis = analyze_password(target_input, weights=weights, h_ref=h_ref, wordlist_path=active_wordlist_path)
     table_rows = []
     weighted_p_sum = 0.0
     active_w_sum = 0.0
