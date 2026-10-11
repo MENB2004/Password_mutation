@@ -32,6 +32,10 @@ from .wordlist import (
     get_current_wordlist_info,
     WordlistInfo,
 )
+from .randomness import (
+    PROVENANCE_USER_ENTERED,
+    ASSURANCE_USER_ENTERED,
+)
 
 # Curated reference dictionary of common root words, names, concepts, and seasons.
 # Educational reference corpus; for research version, can be extended with licensed lists.
@@ -215,6 +219,8 @@ class PasswordAnalysis:
     calibrated_psi_empirical: float
     calibrated_classification_empirical: str
     wordlist_source: str = ""
+    generation_provenance: str = PROVENANCE_USER_ENTERED
+    generation_assurance: str = ASSURANCE_USER_ENTERED
 
 
 def character_set_size(password: str) -> int:
@@ -637,7 +643,9 @@ def analyze_password(password: str,
                      h_ref: float = 80.0,
                      probabilities: Optional[Dict[str, float]] = None,
                      wordlist: Optional[Iterable[str]] = None,
-                     wordlist_path: Optional[Union[str, Path]] = None) -> PasswordAnalysis:
+                     wordlist_path: Optional[Union[str, Path]] = None,
+                     generation_provenance: Optional[str] = None,
+                     generation_assurance: Optional[str] = None) -> PasswordAnalysis:
     """Comprehensive password analysis producing theoretical, mutation, and calibrated scores.
 
     Parameters:
@@ -647,6 +655,8 @@ def analyze_password(password: str,
       probabilities: Optional empirical probability dictionary.
       wordlist: Optional explicit in-memory wordlist iterable.
       wordlist_path: Optional path to an external plain-text wordlist file.
+      generation_provenance: Optional generation provenance description.
+      generation_assurance: Optional generation assurance statement.
     """
     if not isinstance(password, str):
         raise TypeError(f"password must be a string, got {type(password).__name__}")
@@ -654,6 +664,9 @@ def analyze_password(password: str,
         raise ValueError(f"h_ref must be a positive finite number, got {h_ref}.")
     if weights is not None and len(weights) == 0:
         raise ValueError("Weights dictionary cannot be empty.")
+
+    gen_prov = generation_provenance or PROVENANCE_USER_ENTERED
+    gen_assur = generation_assurance or ASSURANCE_USER_ENTERED
 
     if wordlist is not None:
         wl_info = WordlistInfo(
@@ -699,6 +712,8 @@ def analyze_password(password: str,
             calibrated_psi_empirical=0.0,
             calibrated_classification_empirical=cal_class_e,
             wordlist_source=wl_info.label,
+            generation_provenance=gen_prov,
+            generation_assurance=gen_assur,
         )
 
     n = character_set_size(password)
@@ -762,6 +777,8 @@ def analyze_password(password: str,
         calibrated_psi_empirical=cal_psi_emp,
         calibrated_classification_empirical=cal_class_emp,
         wordlist_source=wl_info.label,
+        generation_provenance=gen_prov,
+        generation_assurance=gen_assur,
     )
 
 

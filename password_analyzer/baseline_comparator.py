@@ -16,6 +16,10 @@ from .core import (
     character_set_size,
     entropy,
 )
+from .randomness import (
+    PROVENANCE_USER_ENTERED,
+    ASSURANCE_USER_ENTERED,
+)
 
 # Optional local zxcvbn import with graceful fallback
 try:
@@ -66,6 +70,8 @@ class BaselineComparison:
     calibrated_psi_empirical: float
     calibrated_classification_empirical: str
     wordlist_source: str = ""
+    generation_provenance: str = PROVENANCE_USER_ENTERED
+    generation_assurance: str = ASSURANCE_USER_ENTERED
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -189,11 +195,21 @@ def compare_password(password: str,
                      weights: Optional[Dict[str, float]] = None,
                      h_ref: float = 80.0,
                      wordlist: Optional[Any] = None,
-                     wordlist_path: Optional[Any] = None) -> BaselineComparison:
+                     wordlist_path: Optional[Any] = None,
+                     generation_provenance: Optional[str] = None,
+                     generation_assurance: Optional[str] = None) -> BaselineComparison:
     """Compare a single password across Conventional Entropy, Existing Estimator (zxcvbn),
     Proposed MVS, and Proposed PSI.
     """
-    analysis = analyze_password(password, weights=weights, h_ref=h_ref, wordlist=wordlist, wordlist_path=wordlist_path)
+    analysis = analyze_password(
+        password,
+        weights=weights,
+        h_ref=h_ref,
+        wordlist=wordlist,
+        wordlist_path=wordlist_path,
+        generation_provenance=generation_provenance,
+        generation_assurance=generation_assurance,
+    )
     est_res = get_existing_estimator_assessment(password)
 
     # Conventional length/diversity score (0-100)
@@ -236,6 +252,8 @@ def compare_password(password: str,
         calibrated_psi_empirical=round(analysis.calibrated_psi_empirical, 1),
         calibrated_classification_empirical=analysis.calibrated_classification_empirical,
         wordlist_source=analysis.wordlist_source,
+        generation_provenance=analysis.generation_provenance,
+        generation_assurance=analysis.generation_assurance,
     )
 
 

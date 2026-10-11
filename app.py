@@ -1,3 +1,4 @@
+import math
 import os
 from pathlib import Path
 import pandas as pd
@@ -28,6 +29,21 @@ from password_analyzer.wordlist import (
     OFFICIAL_OPENWALL_PATH,
     CURATED_WORDLIST_PATH,
     get_openwall_provenance,
+)
+from password_analyzer.randomness import (
+    GeneratorConfig,
+    GenerationResult,
+    generate_secure_password,
+    calculate_configured_entropy,
+    assess_single_password_randomness,
+    validate_generator_batch,
+    build_qualified_randomness_assessment,
+    PROVENANCE_GENERATED,
+    PROVENANCE_USER_ENTERED,
+    ASSURANCE_GENERATED,
+    ASSURANCE_USER_ENTERED,
+    METHOD_DESCRIPTION_GENERATED,
+    METHOD_DESCRIPTION_USER_ENTERED,
 )
 
 # ==============================================================================
@@ -125,7 +141,28 @@ sample_passwords = [
     "Welcome2026",
     "w3lc0m3!",
 ]
-selected_sample = st.sidebar.selectbox("Choose a sample password", [""] + sample_passwords)
+selected_sample = None
+for s_pw in sample_passwords:
+    if st.sidebar.button(s_pw, key=f"btn_{s_pw}", use_container_width=True):
+        selected_sample = s_pw
+
+if "current_password" not in st.session_state:
+    st.session_state.current_password = "Password123!"
+if "is_generated" not in st.session_state:
+    st.session_state.is_generated = False
+if "generation_provenance" not in st.session_state:
+    st.session_state.generation_provenance = PROVENANCE_USER_ENTERED
+if "generation_assurance" not in st.session_state:
+    st.session_state.generation_assurance = ASSURANCE_USER_ENTERED
+if "last_selected_sample" not in st.session_state:
+    st.session_state.last_selected_sample = ""
+
+if selected_sample and selected_sample != st.session_state.last_selected_sample:
+    st.session_state.current_password = selected_sample
+    st.session_state.is_generated = False
+    st.session_state.generation_provenance = PROVENANCE_USER_ENTERED
+    st.session_state.generation_assurance = ASSURANCE_USER_ENTERED
+    st.session_state.last_selected_sample = selected_sample
 
 # Top Navigation Tabs
 main_tabs = st.tabs([
@@ -135,9 +172,10 @@ main_tabs = st.tabs([
     "📈 Publication Visualizations",
     "📁 Public Research Dataset Pipeline",
     "📐 Mathematical Model Details",
+    "🎲 Randomness & Generation Assurance",
 ])
 
-default_input = selected_sample if selected_sample else "Password123!"
+default_input = st.session_state.current_password
 
 # TAB 1: MODEL COMPARISON & DEEP DIVE (Task 6)
 with main_tabs[0]:
@@ -152,19 +190,61 @@ with main_tabs[0]:
         key="main_password_input",
     )
 
+    if password_input != st.session_state.current_password:
+        st.session_state.current_password = password_input
+        if password_input != st.session_state.get("generated_password_str", ""):
+            st.session_state.is_generated = False
+            st.session_state.generation_provenance = PROVENANCE_USER_ENTERED
+            st.session_state.generation_assurance = ASSURANCE_USER_ENTERED
+
     if password_input:
         try:
-            comp = compare_password(password_input, weights=weights, h_ref=h_ref, wordlist_path=active_wordlist_path)
-            analysis = analyze_password(password_input, weights=weights, h_ref=h_ref, wordlist_path=active_wordlist_path)
+            comp = compare_password(
+                password_input,
+                weights=weights,
+                h_ref=h_ref,
+                wordlist_path=active_wordlist_path,
+                generation_provenance=st.session_state.generation_provenance,
+                generation_assurance=st.session_state.generation_assurance,
+            )
+            analysis = analyze_password(
+                password_input,
+                weights=weights,
+                h_ref=h_ref,
+                wordlist_path=active_wordlist_path,
+                generation_provenance=st.session_state.generation_provenance,
+                generation_assurance=st.session_state.generation_assurance,
+            )
         except Exception:
             st.error("⚠️ An error occurred during password analysis. Please verify the input characters.")
             comp = None
             analysis = None
 
         if comp and analysis:
+            # Generation Provenance Banner
+            if st.session_state.get("is_generated", False):
+                st.success(
+                    f"🔒 **Generation Method**: `{analysis.generation_provenance}`\n\n"
+                    f"*{METHOD_DESCRIPTION_GENERATED}*"
+                )
+            else:
+                st.info(
+                    f"👤 **Generation Assurance**: `{analysis.generation_assurance}`\n\n"
+                    f"*{METHOD_DESCRIPTION_USER_ENTERED}*"
+                )
+
             # High-level Metrics Row
             m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Entropy (H)", f"{comp.entropy:.2f} bits", help="Theoretical character-pool entropy: H = L * log2(N)")
+            m1.metric(
+                "Theoretical Character-Pool Entropy (H)",
+                f"{comp.entropy:.2f} bits",
+                help=(
+                    "Theoretical Character-Pool Entropy: H = L * log2(N). Assumes each character is selected uniformly "
+                    "and independently at random from the assumed character pool (N). Human-created passwords and biased "
+                    "generators violate these assumptions. Theoretical entropy represents an idealized combinatorial "
+                    "upper bound, NOT measured randomness or verified security."
+                ),
+            )
             m2.metric("Fixed MVS", f"{comp.mvs:.1f}/100", help="Baseline weighted mutation score (100 * sum(w_i * x_i))")
             m3.metric("PSI (Fixed MVS)", f"{comp.psi_fixed_mvs:.1f}/100", help="Normalized entropy discounted by Fixed MVS")
             m4.metric(
@@ -189,7 +269,17 @@ with main_tabs[0]:
                     st.write(f"• **Search space ($S = N^L$):** `> 10^{int(analysis.password_length * math.log10(max(1, analysis.character_set_size)))}` combinations")
                 else:
                     st.write(f"• **Search space ($S = N^L$):** `{analysis.search_space:,}` combinations")
-                st.write(f"• **Theoretical entropy ($H$):** `{comp.entropy:.2f}` bits")
+                st.write(f"• **Theoretical Character-Pool Entropy ($H$):** `{comp.entropy:.2f}` bits")
+
+                with st.expander("ℹ️ Entropy Estimation Assumptions & Scientific Limitations"):
+                    st.markdown(
+                        """
+                        - **Formula**: $H = L \\cdot \\log_2(N)$, where $L$ is length and $N$ is character pool size.
+                        - **Independent & Uniform Assumption**: This formula strictly assumes each character is independently and uniformly chosen across $N$ possible outcomes.
+                        - **Human vs. Machine Behavior**: Human-composed passwords, common dictionary roots, predictable substitutions, and biased generators heavily violate these assumptions.
+                        - **Upper Bound Nature**: Theoretical entropy represents a combinatorial brute-force upper bound, **NOT** measured randomness or guaranteed security.
+                        """
+                    )
 
             # 2. PREDICTABLE MUTATION ANALYSIS
             with col_right:
@@ -444,3 +534,208 @@ with main_tabs[5]:
     st.latex(r"\text{MVS} = 100 \sum w_i x_i \quad \text{and} \quad \text{MVS}_{\text{emp}} = 100 \frac{\sum w_i \hat{p}_i x_i}{\sum w_i x_i}")
     st.latex(r"\text{PSI} = 100 \times \min\left(\frac{H}{H_{\text{ref}}}, 1\right) \times \left(1 - \frac{\text{MVS}}{100}\right)")
     st.latex(r"\text{Decision Boundary: } \text{Classified Vulnerable if } \text{PSI}_{\text{cal}} < 69.0 \text{ at } H_{\text{ref}} = 50.0")
+
+# TAB 7: RANDOMNESS ASSESSMENT & GENERATION ASSURANCE
+with main_tabs[6]:
+    st.header("🎲 Randomness & Generation Assurance")
+    st.markdown(
+        "A scientifically defensible assessment distinguishing **Theoretical Character-Pool Entropy**, "
+        "**detected predictable patterns**, **statistical test diagnostics**, and **generation process assurance**."
+    )
+
+    # 1. CSPRNG PASSWORD GENERATOR
+    st.subheader("🔐 Cryptographically Secure Password Generator (CSPRNG)")
+    st.caption(
+        "Generates passwords using Python's `secrets` module (`secrets.choice()`), which interfaces directly with "
+        "the operating system's cryptographic random number generator (CSPRNG). Never uses Python's insecure `random` module."
+    )
+
+    g_col1, g_col2 = st.columns(2)
+    with g_col1:
+        gen_len = st.slider("Requested Password Length (L)", min_value=4, max_value=64, value=16, step=1, key="gen_len_slider")
+        use_lower = st.checkbox("Include Lowercase letters (a-z)", value=True, key="gen_lower")
+        use_upper = st.checkbox("Include Uppercase letters (A-Z)", value=True, key="gen_upper")
+    with g_col2:
+        use_digits = st.checkbox("Include Digits (0-9)", value=True, key="gen_digits")
+        use_symbols = st.checkbox("Include Symbols & Punctuation", value=True, key="gen_symbols")
+        custom_symbols = st.text_input("Custom Symbol Set", value="!@#$%^&*()_+-=[]{}|;:,.<>?", key="gen_custom_symbols")
+
+    temp_cfg = GeneratorConfig(
+        length=gen_len,
+        use_lowercase=use_lower,
+        use_uppercase=use_upper,
+        use_digits=use_digits,
+        use_symbols=use_symbols,
+        custom_symbols=custom_symbols,
+    )
+    temp_pool = temp_cfg.get_character_pool()
+    temp_pool_size = len(temp_pool)
+    temp_entropy = calculate_configured_entropy(gen_len, temp_pool_size)
+
+    c_m1, c_m2, c_m3 = st.columns(3)
+    c_m1.metric("Alphabet Size (N)", f"{temp_pool_size} chars")
+    c_m2.metric("Configured Length (L)", f"{gen_len} chars")
+    c_m3.metric("Theoretical Character-Pool Entropy", f"{temp_entropy:.2f} bits", help="H = L * log2(N) under uniform independent drawing.")
+
+    if not temp_pool:
+        st.error("⚠️ Invalid configuration: At least one character class must be selected.")
+
+    if st.button("🎲 Generate Secure Password", type="primary", disabled=(len(temp_pool) == 0)):
+        try:
+            gen_result = generate_secure_password(temp_cfg)
+            st.session_state.current_password = gen_result.password
+            st.session_state.generated_password_str = gen_result.password
+            st.session_state.is_generated = True
+            st.session_state.generation_provenance = gen_result.generation_method
+            st.session_state.generation_assurance = gen_result.generation_assurance
+            st.success(f"Generated secure password: `{gen_result.password}`")
+            st.info(
+                f"**Generation Method**: `{gen_result.generation_method}`\n\n"
+                f"*{gen_result.method_explanation}*"
+            )
+        except Exception as e:
+            st.error(f"Generation error: {e}")
+
+    # 2. ASSESSMENT OF ACTIVE PASSWORD
+    st.markdown("---")
+    st.subheader("🔍 Randomness & Predictability Assessment for Current Password")
+    active_pw = st.session_state.get("current_password", "")
+    is_gen = st.session_state.get("is_generated", False)
+
+    if not active_pw:
+        st.warning("Please enter or generate a password to assess.")
+    else:
+        pw_analysis = analyze_password(
+            active_pw,
+            weights=weights,
+            h_ref=h_ref,
+            wordlist_path=active_wordlist_path,
+            generation_provenance=st.session_state.get("generation_provenance", PROVENANCE_USER_ENTERED),
+            generation_assurance=st.session_state.get("generation_assurance", ASSURANCE_USER_ENTERED),
+        )
+        single_diagnostics = assess_single_password_randomness(active_pw, assumed_pool_size=pw_analysis.character_set_size)
+        qualified_assessment = build_qualified_randomness_assessment(
+            active_pw,
+            is_generated=is_gen,
+            dictionary_base=pw_analysis.dictionary_base,
+            mutations=pw_analysis.mutations,
+            assumed_pool=pw_analysis.character_set_size,
+            diagnostics=single_diagnostics,
+        )
+
+        # Provenance Banner
+        if is_gen:
+            st.success(
+                f"🔒 **Generation Method**: `{qualified_assessment.generation_provenance}`\n\n"
+                f"*{METHOD_DESCRIPTION_GENERATED}*"
+            )
+        else:
+            st.info(
+                f"👤 **Generation Assurance**: `{qualified_assessment.generation_assurance}`\n\n"
+                f"*{METHOD_DESCRIPTION_USER_ENTERED}*"
+            )
+
+        # 4 Indicators Cards
+        q1, q2, q3, q4 = st.columns(4)
+        q1.metric(
+            "1. Theoretical Entropy",
+            f"{pw_analysis.entropy_bits:.2f} bits",
+            help="H = L * log2(N). Assumes uniform independent selection from character pool."
+        )
+        q2.metric(
+            "2. Dictionary Patterns",
+            "Detected" if pw_analysis.dictionary_base else "None Detected",
+            help=f"Dictionary root: {pw_analysis.dictionary_base or 'None'}"
+        )
+        has_structural = any(m in pw_analysis.mutations for m in ["sequential characters", "repetitive characters", "keyboard sequence"])
+        q3.metric(
+            "3. Structural Patterns",
+            "Detected" if has_structural else "None Detected",
+            help="Sequences, repetitions, or keyboard patterns detected by analysis rules."
+        )
+        q4.metric(
+            "4. Generation Provenance",
+            "Verified CSPRNG" if is_gen else "Unknown (Entered)",
+            help=qualified_assessment.generation_assurance
+        )
+
+        # Qualified assessment summary callout
+        st.markdown("#### 📋 Qualified Assessment Summary")
+        st.markdown(
+            f"> **Scientific Finding**: {qualified_assessment.qualified_summary}"
+        )
+
+        with st.expander("ℹ️ Scientific Limitations & Non-Claim Principles"):
+            for lim in qualified_assessment.scientific_limitations:
+                st.markdown(f"• {lim}")
+            st.markdown(
+                "• **Critical Principle**: Statistical tests cannot prove that an arbitrary password is random. "
+                "The application strictly avoids labeling any password *'Proven Random'* or *'Guaranteed Secure'*."
+            )
+
+        # Single Password Statistical Diagnostics Table
+        st.markdown("#### 📈 Statistical Diagnostics (Single Password)")
+        st.caption(
+            f"Evaluated on active password (Length $L={len(active_pw)}$ characters, Alphabet $N={pw_analysis.character_set_size}$). "
+            f"Summary: **{single_diagnostics.passed_count} Passed**, **{single_diagnostics.failed_count} Failed**, "
+            f"**{single_diagnostics.not_applicable_count} Not applicable**."
+        )
+
+        diag_data = []
+        for t in single_diagnostics.tests:
+            diag_data.append({
+                "Test Name": t.test_name,
+                "Status": t.status,
+                "Observed Value": t.observed_value,
+                "Evaluation Threshold / Criteria": t.threshold_criteria,
+                "What It Detects": t.what_it_detects,
+                "What It Cannot Establish": t.what_it_cannot_establish,
+            })
+        st.dataframe(pd.DataFrame(diag_data), width="stretch", hide_index=True)
+        st.caption(f"💡 *Methodological Note*: {single_diagnostics.methodological_note}")
+
+    # 3. CONTROLLED BATCH GENERATOR DIAGNOSTICS
+    st.markdown("---")
+    st.subheader("🧪 Controlled Batch Generator Diagnostics")
+    st.markdown(
+        "Statistical tests for uniform goodness-of-fit and position-specific independence require sufficient sample sizes "
+        "($E_i \\ge 5$ per alphabet bin, $n \\ge 50$ to $250$). This section executes a controlled empirical benchmark "
+        "by generating a synthetic batch using the application's CSPRNG (`secrets.choice()`)."
+    )
+
+    b_col1, b_col2 = st.columns(2)
+    with b_col1:
+        batch_size_sel = st.selectbox("Batch Sample Size (n)", options=[50, 100, 200, 250], index=1, key="batch_size_sel")
+    with b_col2:
+        st.write("") # vertical spacing
+        st.write("")
+        run_batch_btn = st.button("🚀 Run Batch Generator Diagnostics", key="btn_run_batch")
+
+    if run_batch_btn:
+        with st.spinner(f"Generating and evaluating {batch_size_sel} CSPRNG sample passwords..."):
+            b_res = validate_generator_batch(temp_cfg, batch_size=batch_size_sel)
+
+        bm1, bm2, bm3, bm4 = st.columns(4)
+        bm1.metric("Batch Samples", f"{b_res.batch_size} passwords")
+        bm2.metric("Total Characters", f"{b_res.total_characters_evaluated:,}")
+        bm3.metric("Empirical Shannon Entropy", f"{b_res.empirical_entropy_per_char:.3f} bits/char")
+        bm4.metric("Entropy Efficiency", f"{b_res.entropy_efficiency_ratio:.2%}", help="Ratio of empirical entropy to theoretical maximum log2(N).")
+
+        b_diag_data = []
+        for bt in b_res.tests:
+            b_diag_data.append({
+                "Diagnostic Test": bt.test_name,
+                "Status": bt.status,
+                "Observed Value": bt.observed_value,
+                "Threshold Criteria": bt.threshold_criteria,
+                "What It Detects": bt.what_it_detects,
+                "What It Cannot Establish": bt.what_it_cannot_establish,
+            })
+        st.dataframe(pd.DataFrame(b_diag_data), width="stretch", hide_index=True)
+
+        st.info(
+            "🔬 **Batch Validation Interpretation**: Successful batch diagnostics confirm that the application's "
+            "generator code correctly samples uniformly and independently from the configured character alphabet without "
+            "length truncation, positional template bias, or class restriction. However, software-level testing cannot "
+            "verify the physical entropy collection mechanisms or hardware state of the underlying host operating system."
+        )
