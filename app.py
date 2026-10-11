@@ -6,6 +6,7 @@ import streamlit as st
 from password_analyzer.core import (
     analyze_password,
     DEFAULT_WEIGHTS,
+    DEFAULT_H_REF,
     DEFAULT_EMPIRICAL_PROBABILITIES,
     DEFAULT_SURPRISAL_BITS,
     WEIGHT_PROFILES,
@@ -23,6 +24,14 @@ from password_analyzer.dataset_pipeline import (
     create_example_public_research_dataset,
 )
 
+# ==============================================================================
+# FEATURE FLAGS & CONFIGURATION
+# ==============================================================================
+# Controls visibility of the Model Configuration sidebar section (weights, profiles, H_ref).
+# False: Clean, streamlined analysis interface using default academic parameters.
+# True:  Interactive controls for modifying weights presets, custom sliders, and H_ref.
+SHOW_MODEL_CONFIGURATION = False
+
 st.set_page_config(
     page_title="Password Mutation & Empirical Security Analyzer",
     page_icon="🔐",
@@ -35,51 +44,56 @@ st.caption(
     "empirical probability estimation (Phase 3), and held-out calibration (Phase 5)."
 )
 
-# Sidebar: Configuration
-st.sidebar.header("⚙️ Model Configuration")
+# Sidebar: Model Configuration (Conditionally rendered)
+if SHOW_MODEL_CONFIGURATION:
+    st.sidebar.header("⚙️ Model Configuration")
 
-# Preset selection
-profile_name = st.sidebar.selectbox(
-    "Weight Profile Preset (Phase 4)",
-    options=list(WEIGHT_PROFILES.keys()) + ["Custom"],
-    index=0,
-)
+    # Preset selection
+    profile_name = st.sidebar.selectbox(
+        "Weight Profile Preset (Phase 4)",
+        options=list(WEIGHT_PROFILES.keys()) + ["Custom"],
+        index=0,
+    )
 
-if profile_name != "Custom":
-    active_weights = WEIGHT_PROFILES[profile_name].copy()
-    st.sidebar.caption(f"Loaded '{profile_name}' weight preset.")
-else:
-    active_weights = DEFAULT_WEIGHTS.copy()
-
-with st.sidebar.expander("Adjust Mutation Weights", expanded=(profile_name == "Custom")):
-    weights = {}
-    for key, default in active_weights.items():
-        weights[key] = st.slider(
-            key.replace("_", " ").title(),
-            min_value=0.0,
-            max_value=1.0,
-            value=float(default),
-            step=0.05,
-        )
-    if sum(weights.values()) <= 0:
-        st.sidebar.warning("⚠️ Weights must sum to a positive value. Using defaults.")
-        weights = DEFAULT_WEIGHTS.copy()
+    if profile_name != "Custom":
+        active_weights = WEIGHT_PROFILES[profile_name].copy()
+        st.sidebar.caption(f"Loaded '{profile_name}' weight preset.")
     else:
-        st.sidebar.caption("💡 Custom weights are normalized to sum to 1.0 (100%) across the 5 features.")
+        active_weights = DEFAULT_WEIGHTS.copy()
 
-# Reference entropy configuration
-st.sidebar.subheader("Entropy Normalization")
-use_calibrated = st.sidebar.checkbox(
-    f"Use Phase 5 Calibrated H_ref ({CALIBRATED_H_REF:.0f} bits)",
-    value=False,
-    help="Locks H_ref to 50 bits as selected during independent calibration in Phase 5.",
-)
+    with st.sidebar.expander("Adjust Mutation Weights", expanded=(profile_name == "Custom")):
+        weights = {}
+        for key, default in active_weights.items():
+            weights[key] = st.slider(
+                key.replace("_", " ").title(),
+                min_value=0.0,
+                max_value=1.0,
+                value=float(default),
+                step=0.05,
+            )
+        if sum(weights.values()) <= 0:
+            st.sidebar.warning("⚠️ Weights must sum to a positive value. Using defaults.")
+            weights = DEFAULT_WEIGHTS.copy()
+        else:
+            st.sidebar.caption("💡 Custom weights are normalized to sum to 1.0 (100%) across the 5 features.")
 
-if use_calibrated:
-    h_ref = CALIBRATED_H_REF
-    st.sidebar.info(f"H_ref locked to calibrated value: {CALIBRATED_H_REF:.0f} bits")
+    # Reference entropy configuration
+    st.sidebar.subheader("Entropy Normalization")
+    use_calibrated = st.sidebar.checkbox(
+        f"Use Phase 5 Calibrated H_ref ({CALIBRATED_H_REF:.0f} bits)",
+        value=False,
+        help="Locks H_ref to 50 bits as selected during independent calibration in Phase 5.",
+    )
+
+    if use_calibrated:
+        h_ref = CALIBRATED_H_REF
+        st.sidebar.info(f"H_ref locked to calibrated value: {CALIBRATED_H_REF:.0f} bits")
+    else:
+        h_ref = st.sidebar.slider("Reference entropy H_ref (bits)", 40, 160, 80, step=5)
 else:
-    h_ref = st.sidebar.slider("Reference entropy H_ref (bits)", 40, 160, 80, step=5)
+    # Default model configuration when the configuration UI is disabled
+    weights = DEFAULT_WEIGHTS.copy()
+    h_ref = DEFAULT_H_REF
 
 # Example quick-fill buttons
 st.sidebar.subheader("Quick Example Passwords")

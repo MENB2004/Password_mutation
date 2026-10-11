@@ -1370,4 +1370,33 @@ def test_calibrated_fixed_and_empirical_distinctness():
     assert comp.calibrated_classification_empirical == "Predictable Mutation (Vulnerable Family)"
 
 
+def test_feature_flag_show_model_configuration_default():
+    """Verify that SHOW_MODEL_CONFIGURATION feature flag exists and defaults to False."""
+    import app
+    assert hasattr(app, "SHOW_MODEL_CONFIGURATION")
+    assert isinstance(app.SHOW_MODEL_CONFIGURATION, bool)
+    assert app.SHOW_MODEL_CONFIGURATION is False
+
+
+def test_model_configuration_defaults_consistency():
+    """Verify analysis behavior with default parameters when UI configuration is disabled."""
+    from password_analyzer.core import DEFAULT_WEIGHTS, DEFAULT_H_REF, analyze_password
+    from password_analyzer.baseline_comparator import compare_password
+
+    # Analysis with explicit default parameters must match analysis with omitted parameters
+    a_explicit = analyze_password("Password123!", weights=DEFAULT_WEIGHTS.copy(), h_ref=DEFAULT_H_REF)
+    a_default = analyze_password("Password123!")
+    assert a_explicit.mvs == a_default.mvs
+    assert a_explicit.psi == a_default.psi
+    assert a_explicit.empirical_mvs == a_default.empirical_mvs
+    assert a_explicit.calibrated_psi_fixed == a_default.calibrated_psi_fixed
+
+    c_explicit = compare_password("Password123!", weights=DEFAULT_WEIGHTS.copy(), h_ref=DEFAULT_H_REF)
+    c_default = compare_password("Password123!")
+    assert c_explicit.mvs == c_default.mvs
+    assert c_explicit.psi_fixed_mvs == c_default.psi_fixed_mvs
+    assert c_explicit.calibrated_psi_fixed == c_default.calibrated_psi_fixed
+
+
+
 
