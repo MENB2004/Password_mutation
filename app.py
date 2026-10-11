@@ -30,7 +30,7 @@ from password_analyzer.dataset_pipeline import (
 # Controls visibility of the Model Configuration sidebar section (weights, profiles, H_ref).
 # False: Clean, streamlined analysis interface using default academic parameters.
 # True:  Interactive controls for modifying weights presets, custom sliders, and H_ref.
-SHOW_MODEL_CONFIGURATION = False
+SHOW_MODEL_CONFIGURATION = True
 
 st.set_page_config(
     page_title="Password Mutation & Empirical Security Analyzer",
