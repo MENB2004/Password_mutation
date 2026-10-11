@@ -35,13 +35,6 @@ st.caption(
     "empirical probability estimation (Phase 3), and held-out calibration (Phase 5)."
 )
 
-st.warning(
-    "⚠️ **Security & Privacy Notice**: "
-    "Inputs are processed ephemerally in volatile memory. Passwords are never persisted to disk, stored in databases, written to diagnostic logs, or transmitted to external services. "
-    "This system is designed as an educational and academic demonstration using synthetic test cases. "
-    "**Never submit real-world production passwords or sensitive credentials.**"
-)
-
 # Sidebar: Configuration
 st.sidebar.header("⚙️ Model Configuration")
 
