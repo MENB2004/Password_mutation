@@ -771,7 +771,7 @@ def test_regression_agreement_detected_features_components_and_explanations():
 def test_regression_zxcvbn_behaviour():
     """Verify zxcvbn behavior, feedback, crack times, and heuristic fallback resilience."""
     assessment = get_existing_estimator_assessment("Password123!")
-    assert assessment["name"] == "Dropbox zxcvbn"
+    assert assessment["name"] == "zxcvbn"
     assert 0 <= assessment["score"] <= 4
     assert 0.0 <= assessment["normalized"] <= 100.0
     assert assessment["guesses_log10"] > 0
@@ -1398,5 +1398,101 @@ def test_model_configuration_defaults_consistency():
     assert c_explicit.calibrated_psi_fixed == c_default.calibrated_psi_fixed
 
 
+def test_ten_canonical_password_categories_validation():
+    """Systematically validate predictable mutation detection across all 10 canonical categories."""
+    from password_analyzer.core import analyze_password
+    from password_analyzer.baseline_comparator import compare_password
 
+    # 1. Common dictionary password
+    p1 = analyze_password("password")
+    assert p1.dictionary_base == "password"
+    assert p1.mutations == []
+    assert p1.mutation_components["dictionary_base"] == 1.0
+    assert math.isclose(p1.mvs, 35.0, abs_tol=1e-5)
+    assert math.isclose(p1.empirical_mvs, 31.9277, abs_tol=1e-3)
+    assert p1.calibrated_psi_fixed < 69.0
 
+    # 2. Dictionary word with numeric suffix
+    p2 = analyze_password("password123")
+    assert p2.dictionary_base == "password"
+    assert "numeric suffix" in p2.mutations
+    assert p2.mutation_components["numeric_suffix"] == 1.0
+    assert math.isclose(p2.mvs, 55.0, abs_tol=1e-5)
+
+    # 3. Capitalized dictionary word
+    p3 = analyze_password("Password")
+    assert p3.dictionary_base == "password"
+    assert "capitalization" in p3.mutations
+    assert p3.mutation_components["capitalization"] == 1.0
+    assert math.isclose(p3.mvs, 50.0, abs_tol=1e-5)
+
+    # 4. Dictionary word with common character substitutions
+    p4 = analyze_password("p@ssw0rd")
+    assert p4.dictionary_base == "password"
+    assert "character substitution" in p4.mutations
+    assert p4.mutation_components["substitution"] == 1.0
+    assert math.isclose(p4.mvs, 55.0, abs_tol=1e-5)
+
+    # 5. Dictionary word with a symbol suffix
+    p5 = analyze_password("password!")
+    assert p5.dictionary_base == "password"
+    assert "symbol suffix" in p5.mutations
+    assert p5.mutation_components["symbol_suffix"] == 1.0
+    assert math.isclose(p5.mvs, 45.0, abs_tol=1e-5)
+
+    # 6. Mixed-character password with no detected patterns
+    p6 = analyze_password("xK9#mQ2$vL8*")
+    c6 = compare_password("xK9#mQ2$vL8*")
+    assert p6.dictionary_base is None
+    assert p6.mutations == []
+    assert p6.mvs == 0.0
+    assert p6.empirical_mvs == 0.0
+    assert "No dictionary base or supported predictable mutation pattern was detected" in c6.explanation
+    assert "does not establish that the password is truly random" in c6.explanation
+
+    # 7. Structural numeric sequence without a dictionary base
+    p7 = analyze_password("12345678")
+    c7 = compare_password("12345678")
+    assert p7.dictionary_base is None
+    assert "sequential characters" in p7.mutations
+    assert p7.mvs == 0.0
+    assert p7.empirical_mvs == 0.0
+    assert p7.risk_category == "High predictability risk"
+    assert "No dictionary root word was detected in this password" in c7.explanation
+
+    # 8. Password combining several predictable mutations
+    p8a = analyze_password("Password123!")
+    assert p8a.dictionary_base == "password"
+    assert set(p8a.mutations) == {"capitalization", "numeric suffix", "symbol suffix"}
+    assert math.isclose(p8a.mvs, 80.0, abs_tol=1e-5)
+
+    p8b = analyze_password("P@ssword2026!")
+    assert p8b.dictionary_base == "password"
+    assert set(p8b.mutations) == {"capitalization", "character substitution", "numeric suffix", "symbol suffix"}
+    assert math.isclose(p8b.mvs, 100.0, abs_tol=1e-5)
+
+    # 9. Unrelated random-looking character sequence
+    p9 = analyze_password("vQ7mK2xR9zP4")
+    c9 = compare_password("vQ7mK2xR9zP4")
+    assert p9.dictionary_base is None
+    assert p9.mutations == []
+    assert p9.mvs == 0.0
+    assert p9.empirical_mvs == 0.0
+    assert p9.calibrated_psi_fixed == 100.0
+    assert p9.calibrated_classification_fixed == "Low Vulnerability (Synthetic Random-like Control)"
+    assert "does not establish that the password is truly random" in c9.explanation
+
+    # 10. Empty input and boundary cases
+    p10_empty = analyze_password("")
+    c10_empty = compare_password("")
+    assert p10_empty.password_length == 0
+    assert p10_empty.entropy_bits == 0.0
+    assert p10_empty.mvs == 0.0
+    assert p10_empty.psi == 0.0
+    assert p10_empty.risk_category == "High predictability risk"
+    assert "empty or whitespace-only" in c10_empty.explanation
+
+    p10_ws = analyze_password("     ")
+    assert p10_ws.password_length == 5
+    assert p10_ws.entropy_bits == 0.0
+    assert p10_ws.mvs == 0.0

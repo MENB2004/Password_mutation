@@ -1,5 +1,5 @@
 """Baseline comparison module evaluating conventional entropy meters,
-Dropbox zxcvbn (version 4.4+), and the proposed MVS / PSI framework.
+zxcvbn password-strength estimator (version 4.4+), and the proposed MVS / PSI framework.
 """
 
 import math
@@ -71,12 +71,12 @@ class BaselineComparison:
 
 
 def get_existing_estimator_assessment(password: str) -> Dict[str, Any]:
-    """Obtain a local assessment using Dropbox zxcvbn without making network calls.
+    """Obtain a local assessment using the zxcvbn password-strength estimator without making network calls.
 
     If zxcvbn is not installed or the input is empty/malformed, returns a safe fallback.
     """
     if not password or not password.strip():
-        name = "Dropbox zxcvbn" if (HAS_ZXCVBN and zxcvbn is not None) else "Heuristic Estimator"
+        name = "zxcvbn" if (HAS_ZXCVBN and zxcvbn is not None) else "Heuristic Estimator"
         return {
             "name": name,
             "score": 0,
@@ -104,7 +104,7 @@ def get_existing_estimator_assessment(password: str) -> Dict[str, Any]:
             suggestions = feedback.get("suggestions") or []
             category = ZXCVBN_SCORE_CATEGORIES.get(score, "Unknown")
             return {
-                "name": "Dropbox zxcvbn",
+                "name": "zxcvbn",
                 "score": score,
                 "normalized": float(score * 25.0),
                 "guesses_log10": guesses_log10,
@@ -151,7 +151,7 @@ def generate_explanation(analysis, est_res: Dict[str, Any]) -> str:
             f"(assuming uniform independent selection), the detection of dictionary root '{p}' {mut_desc} "
             f"increases its Mutation Vulnerability Score (Fixed MVS: {analysis.mvs:.1f}/100, "
             f"Empirical MVS: {analysis.empirical_mvs:.1f}/100). "
-            f"Consequently, the Password Security Index discounts the score to PSI_fixed: {analysis.psi:.1f}/100 "
+            f"Consequently, the Password Security Index discounts the score to PSI (Fixed MVS): {analysis.psi:.1f}/100 "
             f"({analysis.risk_category}). Existing estimator ({est_res['name']}) scores it "
             f"{est_res['score']}/4 ('{est_res['category']}')."
         )
@@ -169,16 +169,18 @@ def generate_explanation(analysis, est_res: Dict[str, Any]) -> str:
             f"This password is critically short ({analysis.password_length} characters). "
             f"Regardless of character diversity, short passwords have an exhausted search space "
             f"and can be rapidly brute-forced. It achieves {h:.2f} bits of theoretical character-pool entropy "
-            f"and PSI: {analysis.psi:.1f}/100 ({analysis.risk_category}). "
+            f"and PSI (Fixed MVS): {analysis.psi:.1f}/100 ({analysis.risk_category}). "
             f"Existing estimator ({est_res['name']}) scores it {est_res['score']}/4 ('{est_res['category']}')."
         )
     else:
         return (
-            f"No dictionary base or structural patterns were detected in this password. "
-            f"The password exhibits non-predictable, pseudo-random character distribution, receiving an MVS of {analysis.mvs:.1f}/100. "
-            f"Its theoretical character-pool Shannon entropy is {h:.2f} bits, yielding PSI: {analysis.psi:.1f}/100 "
-            f"({analysis.risk_category}). Existing estimator ({est_res['name']}) scores it "
-            f"{est_res['score']}/4 ('{est_res['category']}')."
+            f"No dictionary base or supported predictable mutation pattern was detected by the current analysis rules "
+            f"(Fixed MVS: {analysis.mvs:.1f}/100, Empirical MVS: {analysis.empirical_mvs:.1f}/100). "
+            f"This absence of detected patterns indicates low predictability under our defined heuristic rules, but does "
+            f"not establish that the password is truly random or guarantee resistance to real-world attacks. "
+            f"Its theoretical character-pool Shannon entropy is {h:.2f} bits (assuming uniform independent character selection), "
+            f"yielding PSI (Fixed MVS): {analysis.psi:.1f}/100 ({analysis.risk_category}). "
+            f"Existing estimator ({est_res['name']}) scores it {est_res['score']}/4 ('{est_res['category']}')."
         )
 
 

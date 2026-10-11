@@ -122,7 +122,7 @@ default_input = selected_sample if selected_sample else "Password123!"
 # TAB 1: MODEL COMPARISON & DEEP DIVE (Task 6)
 with main_tabs[0]:
     st.header("🔬 Model Comparison")
-    st.markdown("Evaluate any synthetic test password across conventional entropy, Dropbox `zxcvbn`, and proposed MVS / PSI.")
+    st.markdown("Evaluate any synthetic test password across conventional entropy, the `zxcvbn` estimator, and proposed MVS / PSI.")
 
     password_input = st.text_input(
         "Enter a test password to analyze:",
@@ -333,7 +333,7 @@ with main_tabs[3]:
         ("baseline_pr_curves.png", "Precision-Recall (PR) Curves"),
         ("baseline_confusion_matrix.png", "Confusion Matrix Comparison"),
         ("baseline_entropy_vs_psi.png", "Theoretical Entropy vs. Proposed PSI"),
-        ("baseline_zxcvbn_vs_psi.png", "Dropbox zxcvbn Score vs. Proposed PSI"),
+        ("baseline_zxcvbn_vs_psi.png", "zxcvbn Score vs. Proposed PSI"),
         ("baseline_mvs_vs_psi.png", "Mutation Vulnerability Score vs. Proposed PSI"),
         ("baseline_mutation_family_comparison.png", "Distribution of PSI Across Mutation Families"),
         ("baseline_conventional_vs_psi.png", "Conventional Password Meter Score vs. Proposed PSI"),
@@ -395,7 +395,7 @@ with main_tabs[4]:
                 report = import_research_dataset(target_dataset_path, dataset_name=dataset_display_name)
             st.dataframe(report.summary_table(), width="stretch", hide_index=True)
 
-            st.subheader("Zxcvbn Score Distribution in Research Corpus")
+            st.subheader("zxcvbn Score Distribution in Research Corpus")
             dist_df = pd.DataFrame(
                 list(report.zxcvbn_score_distribution.items()),
                 columns=["zxcvbn Score (0=Weak, 4=Strong)", "Count"],
